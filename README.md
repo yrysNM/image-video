@@ -1,36 +1,115 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ImageToVideo
 
-## Getting Started
+Next.js 14 app that turns a still image + motion prompt into a short AI video. Providers are swappable via env (`fal`, `runway`, `kling`, or `mock`). Generation history is stored in SQLite with Prisma; uploads go to `public/uploads` locally or an S3-compatible bucket in production.
 
-First, run the development server:
+## Requirements
+
+- Node.js 18+
+- npm 9+
+- A video provider API key when not using mock mode
+
+## Quick start (recommended: free fal.ai credits)
+
+```bash
+cd imagetovideo
+cp .env.example .env
+npm install
+npx prisma db push
+```
+
+1. Create a free account at [https://fal.ai](https://fal.ai) and copy a key from [https://fal.ai/dashboard/keys](https://fal.ai/dashboard/keys)
+2. Put it in `.env`:
+
+```env
+VIDEO_API_PROVIDER=fal
+VIDEO_API_KEY=your_fal_key
+NEXT_PUBLIC_APP_URL=http://localhost:9090
+```
+
+3. Start the app:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:9090](http://localhost:9090) (or whatever port you use).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Local uploads are converted to data URIs, so providers do **not** need a public tunnel to reach your machine.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+> **Note:** DaVinci Resolve is a free *video editor*, not an image-to-video AI API. For free AI generation this app uses **fal.ai Stable Video Diffusion**.
 
-## Learn More
+## Environment variables
 
-To learn more about Next.js, take a look at the following resources:
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | Yes | SQLite URL, e.g. `file:./dev.db` |
+| `VIDEO_API_PROVIDER` | No | `fal` (default), `runway`, `kling`, or `mock` |
+| `VIDEO_API_KEY` | For fal/runway/kling | Provider API key (`FAL_KEY` also accepted for fal) |
+| `NEXT_PUBLIC_APP_URL` | Recommended | Public app URL in prod; localhost is fine with fal/runway data-URI upload |
+| `STORAGE_BUCKET_URL` | Prod optional | Public base URL for S3 objects |
+| `S3_BUCKET` | Prod optional | Bucket name |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` | Prod optional | S3 credentials |
+| `KLING_API_BASE_URL` | Kling optional | Defaults to `https://api.kie.ai` |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Providers
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### fal.ai Stable Video Diffusion (recommended free path)
 
-## Deploy on Vercel
+Uses open-source **Stable Video Diffusion** hosted on fal.ai. New accounts sometimes get starter credits; after that you must add prepaid credits. A **403 Forbidden** response almost always means the account has **$0 balance** or the key is wrong — check [billing](https://fal.ai/dashboard/billing) and [keys](https://fal.ai/dashboard/keys).
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```env
+VIDEO_API_PROVIDER=fal
+VIDEO_API_KEY=your_fal_key
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+SVD animates the image; duration chips map to motion strength. Quality is below Runway Gen-4.5 but it is real AI video. There is no unlimited free cloud I2V API anymore (Hugging Face free serverless no longer hosts these models).
+
+### Mock
+
+Set `VIDEO_API_PROVIDER=mock` for UI testing only (returns a sample flower MP4, not AI).
+
+### Runway (paid)
+
+Uses **gen4.5** via `@runwayml/sdk`.
+
+```env
+VIDEO_API_PROVIDER=runway
+VIDEO_API_KEY=your_runway_key
+```
+
+### Kling (paid / third-party)
+
+HTTP client for the Kie.ai Kling image-to-video job API:
+
+```env
+VIDEO_API_PROVIDER=kling
+VIDEO_API_KEY=your_kling_key
+```
+
+## API routes
+
+- `POST /api/generate` — multipart form: `image` (or `imageUrl` to reuse), `prompt`, optional `negativePrompt`, `duration`, `aspectRatio`. Returns `{ jobId }`.
+- `GET /api/status/[jobId]` — poll job status for the current session.
+- `GET /api/history` — list recent generations for the session cookie.
+
+Sessions use an `httpOnly` `session_id` cookie (no login in v1).
+
+## Production storage
+
+When `S3_BUCKET` (and credentials) or `STORAGE_BUCKET_URL` is configured, uploads go to S3 instead of `public/uploads`.
+
+## Scripts
+
+```bash
+npm run dev          # development server
+npm run build        # production build
+npm run start        # run production server
+npx prisma db push   # sync SQLite schema
+npx prisma studio    # browse DB
+```
+
+## Out of scope (v1)
+
+- User authentication
+- Payments / credits
+- Batch / multi-image generation
