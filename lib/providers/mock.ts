@@ -23,9 +23,12 @@ export class MockProvider implements VideoProvider {
     input: ImageToVideoInput
   ): Promise<{ externalTaskId: string }> {
     const externalTaskId = `mock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const durationMs = input.collaborative
+      ? Math.min(input.duration * 1000, 12000)
+      : 6000;
     jobs.set(externalTaskId, {
       createdAt: Date.now(),
-      durationMs: 6000,
+      durationMs,
       prompt: input.prompt,
     });
     return { externalTaskId };

@@ -2,10 +2,12 @@ import type { AspectRatioOption, DurationOption } from "../types";
 
 export interface ImageToVideoInput {
   imageUrl: string;
+  imageUrls?: string[];
   prompt: string;
   negativePrompt?: string;
   duration: DurationOption;
   aspectRatio: AspectRatioOption;
+  collaborative?: boolean;
 }
 
 export type ProviderTaskStatus =
@@ -37,6 +39,20 @@ export function mapDurationForRunway(duration: DurationOption): number {
 }
 
 export function mapAspectRatioForRunway(
+  aspectRatio: AspectRatioOption
+): "1280:720" | "720:1280" | "960:960" {
+  switch (aspectRatio) {
+    case "9:16":
+      return "720:1280";
+    case "1:1":
+      return "960:960";
+    case "16:9":
+    default:
+      return "1280:720";
+  }
+}
+
+export function mapAspectRatioForSeedance2(
   aspectRatio: AspectRatioOption
 ): "1280:720" | "720:1280" | "960:960" {
   switch (aspectRatio) {
@@ -100,14 +116,17 @@ export function classifyProviderError(error: unknown): ProviderError {
       "PROVIDER"
     );
   }
-  if (
-    lower.includes("content") ||
-    lower.includes("policy") ||
+  const isSafetyBlock =
+    /\bsafety\b/.test(lower) ||
+    lower.includes("content policy") ||
+    lower.includes("content moderation") ||
     lower.includes("moderation") ||
-    lower.includes("safety")
-  ) {
+    lower.includes("blocked by seedance") ||
+    lower.includes("sensitive content");
+
+  if (isSafetyBlock) {
     return new ProviderError(
-      "The prompt or image was rejected by the provider content policy.",
+      `Runway/Seedance blocked this generation. Photos of real people are a common trigger. Original error: ${message}`,
       "CONTENT_POLICY"
     );
   }

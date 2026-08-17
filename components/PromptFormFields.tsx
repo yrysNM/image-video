@@ -3,7 +3,8 @@
 import type { AspectRatioOption, DurationOption } from "@/lib/types";
 import {
   ASPECT_RATIO_OPTIONS,
-  DURATION_OPTIONS,
+  COLLABORATIVE_DURATION_OPTIONS,
+  SINGLE_DURATION_OPTIONS,
 } from "@/lib/validation";
 
 interface PromptFormFieldsProps {
@@ -11,6 +12,7 @@ interface PromptFormFieldsProps {
   negativePrompt: string;
   duration: DurationOption;
   aspectRatio: AspectRatioOption;
+  collaborative: boolean;
   onPromptChange: (value: string) => void;
   onNegativePromptChange: (value: string) => void;
   onDurationChange: (value: DurationOption) => void;
@@ -23,12 +25,17 @@ export function PromptFormFields({
   negativePrompt,
   duration,
   aspectRatio,
+  collaborative,
   onPromptChange,
   onNegativePromptChange,
   onDurationChange,
   onAspectRatioChange,
   disabled = false,
 }: PromptFormFieldsProps) {
+  const durationOptions = collaborative
+    ? COLLABORATIVE_DURATION_OPTIONS
+    : SINGLE_DURATION_OPTIONS;
+
   return (
     <div className="space-y-5">
       <div>
@@ -39,7 +46,11 @@ export function PromptFormFields({
           id="prompt"
           rows={4}
           className="field-input resize-y"
-          placeholder='e.g. "hair blows in the wind, camera slowly zooms in"'
+          placeholder={
+            collaborative
+              ? 'e.g. "smooth transitions between scenes, unified cinematic motion"'
+              : 'e.g. "hair blows in the wind, camera slowly zooms in"'
+          }
           value={prompt}
           onChange={(event) => onPromptChange(event.target.value)}
           disabled={disabled}
@@ -64,9 +75,11 @@ export function PromptFormFields({
 
       <div className="grid gap-5 sm:grid-cols-2">
         <div>
-          <p className="field-label">Duration</p>
+          <p className="field-label">
+            Duration{collaborative ? " (collaborative)" : ""}
+          </p>
           <div className="flex flex-wrap gap-2">
-            {DURATION_OPTIONS.map((option) => (
+            {durationOptions.map((option) => (
               <button
                 key={option}
                 type="button"

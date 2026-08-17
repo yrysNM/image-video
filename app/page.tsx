@@ -12,8 +12,9 @@ export default function HomePage() {
           Animate a still
         </h1>
         <p className="mt-2 max-w-xl text-slate-600">
-          Upload an image, describe the motion you want, and generate a short AI
-          video with Runway. Swap to fal or Kling anytime with an env var.
+          Upload one or more images. With exactly three images, create one
+          collaborative 15–30s video via Runway Seedance 2. Otherwise each image
+          generates its own clip.
         </p>
       </div>
       <Suspense

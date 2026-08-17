@@ -112,6 +112,12 @@ export class FalProvider implements VideoProvider {
   async startImageToVideo(
     input: ImageToVideoInput
   ): Promise<{ externalTaskId: string }> {
+    if (input.collaborative) {
+      throw new ProviderError(
+        "Collaborative mode is only supported with Runway (VIDEO_API_PROVIDER=runway).",
+        "PROVIDER"
+      );
+    }
     try {
       configureFal();
       const imageUrl = await resolveImageUrl(input.imageUrl);

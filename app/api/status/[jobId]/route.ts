@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getVideoProvider } from "@/lib/providers";
 import { getOrCreateSessionId } from "@/lib/session";
 import { asGenerationStatus } from "@/lib/status";
+import { parseImageUrlsJson } from "@/lib/image-urls";
 import type { StatusResponse } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -80,6 +81,7 @@ export async function GET(
       duration: fresh.duration,
       aspectRatio: fresh.aspectRatio,
       imageUrl: fresh.imageUrl,
+      imageUrls: parseImageUrlsJson(fresh.imageUrls),
       videoUrl: fresh.videoUrl,
       errorMessage: fresh.errorMessage,
       createdAt: fresh.createdAt.toISOString(),

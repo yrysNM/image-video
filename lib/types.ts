@@ -1,4 +1,4 @@
-export type DurationOption = 4 | 6 | 10;
+export type DurationOption = 4 | 6 | 10 | 15 | 20 | 30;
 export type AspectRatioOption = "16:9" | "9:16" | "1:1";
 export type ProviderName = "mock" | "runway" | "kling" | "fal";
 
@@ -10,6 +10,7 @@ export type GenerationStatusDto =
 
 export interface GenerateResponse {
   jobId: string;
+  jobIds: string[];
 }
 
 export interface StatusResponse {
@@ -20,6 +21,7 @@ export interface StatusResponse {
   duration: number;
   aspectRatio: string;
   imageUrl: string;
+  imageUrls: string[] | null;
   videoUrl: string | null;
   errorMessage: string | null;
   createdAt: string;

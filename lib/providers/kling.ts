@@ -50,6 +50,12 @@ export class KlingProvider implements VideoProvider {
   async startImageToVideo(
     input: ImageToVideoInput
   ): Promise<{ externalTaskId: string }> {
+    if (input.collaborative) {
+      throw new ProviderError(
+        "Collaborative mode is only supported with Runway (VIDEO_API_PROVIDER=runway).",
+        "PROVIDER"
+      );
+    }
     try {
       const response = await fetch(`${KLING_BASE_URL}/api/v1/jobs/createTask`, {
         method: "POST",

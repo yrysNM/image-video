@@ -8,6 +8,9 @@ interface VideoResultProps {
 }
 
 export function VideoResult({ job }: VideoResultProps) {
+  const imageUrls = job.imageUrls?.length ? job.imageUrls : [job.imageUrl];
+  const collaborative = imageUrls.length >= 3;
+
   const regenerateHref = `/?imageUrl=${encodeURIComponent(job.imageUrl)}&prompt=${encodeURIComponent(job.prompt)}&negativePrompt=${encodeURIComponent(job.negativePrompt ?? "")}&duration=${job.duration}&aspectRatio=${encodeURIComponent(job.aspectRatio)}`;
 
   return (
@@ -27,6 +30,24 @@ export function VideoResult({ job }: VideoResultProps) {
         )}
       </div>
 
+      {collaborative ? (
+        <div className="card space-y-3">
+          <p className="text-sm text-slate-500">Collaborative source images</p>
+          <ul className="grid grid-cols-3 gap-2">
+            {imageUrls.map((url, index) => (
+              <li key={`${url}-${index}`} className="overflow-hidden rounded-xl">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={url}
+                  alt={`Source ${index + 1}`}
+                  className="aspect-square w-full object-cover"
+                />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       <div className="card space-y-3">
         <p className="text-sm text-slate-500">Prompt</p>
         <p className="text-slate-800">{job.prompt}</p>
@@ -37,6 +58,11 @@ export function VideoResult({ job }: VideoResultProps) {
           <span className="rounded-lg bg-slate-100 px-2 py-1">
             {job.aspectRatio}
           </span>
+          {collaborative ? (
+            <span className="rounded-lg bg-teal-50 px-2 py-1 text-teal-800">
+              Collaborative
+            </span>
+          ) : null}
         </div>
       </div>
 

@@ -1,9 +1,12 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { PromptFormFields } from "@/components/PromptFormFields";
-import { UploadDropzone } from "@/components/UploadDropzone";
+import {
+  UploadDropzone,
+  type UploadItem,
+} from "@/components/UploadDropzone";
 import type {
   ApiErrorBody,
   AspectRatioOption,
@@ -11,10 +14,19 @@ import type {
   GenerateResponse,
 } from "@/lib/types";
 import {
+  COLLABORATIVE_IMAGE_COUNT,
   isAspectRatioOption,
+  isCollaborativeDuration,
   isDurationOption,
+  isSingleDuration,
+  MAX_IMAGES,
+  validateGenerationRequest,
   validatePrompt,
 } from "@/lib/validation";
+
+function newItemId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 export function GenerateForm() {
   const router = useRouter();
@@ -26,32 +38,47 @@ export function GenerateForm() {
   const initialDurationRaw = Number(searchParams.get("duration") ?? 6);
   const initialAspect = searchParams.get("aspectRatio") ?? "16:9";
 
-  const [file, setFile] = useState<File | null>(null);
-  const [reuseImageUrl, setReuseImageUrl] = useState<string | null>(
+  const [items, setItems] = useState<UploadItem[]>(() =>
     initialImageUrl
+      ? [
+          {
+            id: newItemId(),
+            url: initialImageUrl,
+            name: "Previous image",
+          },
+        ]
+      : []
   );
   const [prompt, setPrompt] = useState(initialPrompt);
   const [negativePrompt, setNegativePrompt] = useState(initialNegative);
-  const [duration, setDuration] = useState<DurationOption>(
-    isDurationOption(initialDurationRaw) ? initialDurationRaw : 6
-  );
+  const [duration, setDuration] = useState<DurationOption>(() => {
+    if (isDurationOption(initialDurationRaw)) return initialDurationRaw;
+    return 6;
+  });
   const [aspectRatio, setAspectRatio] = useState<AspectRatioOption>(
     isAspectRatioOption(initialAspect) ? initialAspect : "16:9"
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const previewUrl = useMemo(() => {
-    if (file) return URL.createObjectURL(file);
-    return reuseImageUrl;
-  }, [file, reuseImageUrl]);
+  const collaborative = items.length === COLLABORATIVE_IMAGE_COUNT;
 
   useEffect(() => {
-    if (!file || !previewUrl) return;
+    const blobUrls = items
+      .filter((item) => item.file)
+      .map((item) => item.url);
     return () => {
-      URL.revokeObjectURL(previewUrl);
+      blobUrls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [file, previewUrl]);
+  }, [items]);
+
+  useEffect(() => {
+    if (collaborative && isSingleDuration(duration)) {
+      setDuration(15);
+    } else if (!collaborative && isCollaborativeDuration(duration)) {
+      setDuration(6);
+    }
+  }, [collaborative, duration]);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -62,8 +89,10 @@ export function GenerateForm() {
       setError(promptError);
       return;
     }
-    if (!file && !reuseImageUrl) {
-      setError("Please upload an image.");
+
+    const requestError = validateGenerationRequest(items.length, duration);
+    if (requestError) {
+      setError(requestError);
       return;
     }
 
@@ -74,10 +103,13 @@ export function GenerateForm() {
       form.set("negativePrompt", negativePrompt);
       form.set("duration", String(duration));
       form.set("aspectRatio", aspectRatio);
-      if (file) {
-        form.set("image", file);
-      } else if (reuseImageUrl) {
-        form.set("imageUrl", reuseImageUrl);
+
+      for (const item of items) {
+        if (item.file) {
+          form.append("images", item.file);
+        } else {
+          form.append("imageUrl", item.url);
+        }
       }
 
       const response = await fetch("/api/generate", {
@@ -101,6 +133,11 @@ export function GenerateForm() {
         return;
       }
 
+      if (payload.jobIds.length > 1) {
+        router.push("/history");
+        return;
+      }
+
       router.push(`/result/${payload.jobId}`);
     } catch {
       setError("Network error while starting generation.");
@@ -109,21 +146,50 @@ export function GenerateForm() {
     }
   }
 
+  const generateLabel = collaborative
+    ? `Generate collaborative ${duration}s video`
+    : items.length > 1
+      ? `Generate ${items.length} videos`
+      : "Generate Video";
+
   return (
     <form onSubmit={onSubmit} className="card space-y-6">
       <UploadDropzone
-        file={file}
-        previewUrl={previewUrl}
+        items={items}
         disabled={submitting}
-        onFileChange={(next) => {
-          setFile(next);
-          if (next) setReuseImageUrl(null);
+        collaborative={collaborative}
+        onAddFiles={(files) => {
+          setItems((current) => {
+            const room = MAX_IMAGES - current.length;
+            const next = files.slice(0, room).map((file) => ({
+              id: newItemId(),
+              file,
+              url: URL.createObjectURL(file),
+              name: file.name,
+            }));
+            return [...current, ...next];
+          });
+        }}
+        onRemove={(id) => {
+          setItems((current) => {
+            const removed = current.find((item) => item.id === id);
+            if (removed?.file) {
+              URL.revokeObjectURL(removed.url);
+            }
+            return current.filter((item) => item.id !== id);
+          });
         }}
       />
 
-      {!file && reuseImageUrl ? (
+      {collaborative ? (
         <p className="rounded-xl bg-teal-50 px-3 py-2 text-sm text-teal-800">
-          Reusing previous image. Upload a new file to replace it.
+          Three images will be blended into one collaborative video using Runway
+          Seedance 2. Choose 15s, 20s, or 30s.
+        </p>
+      ) : items.length > 1 ? (
+        <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Upload exactly 3 images to create one collaborative 15–30s video. With{" "}
+          {items.length} images, each will generate a separate clip.
         </p>
       ) : null}
 
@@ -132,6 +198,7 @@ export function GenerateForm() {
         negativePrompt={negativePrompt}
         duration={duration}
         aspectRatio={aspectRatio}
+        collaborative={collaborative}
         onPromptChange={setPrompt}
         onNegativePromptChange={setNegativePrompt}
         onDurationChange={setDuration}
@@ -148,8 +215,12 @@ export function GenerateForm() {
         </div>
       ) : null}
 
-      <button type="submit" className="btn-primary w-full sm:w-auto" disabled={submitting}>
-        {submitting ? "Starting…" : "Generate Video"}
+      <button
+        type="submit"
+        className="btn-primary w-full sm:w-auto"
+        disabled={submitting}
+      >
+        {submitting ? "Starting…" : generateLabel}
       </button>
     </form>
   );

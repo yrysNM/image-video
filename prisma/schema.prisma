@@ -16,6 +16,7 @@ model Generation {
   duration       Int
   aspectRatio    String
   imageUrl       String
+  imageUrls      String?
   videoUrl       String?
   provider       String
   externalTaskId String?
