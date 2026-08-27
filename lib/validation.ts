@@ -5,8 +5,8 @@ export const MAX_IMAGES = 8;
 export const COLLABORATIVE_IMAGE_COUNT = 3;
 export const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png"]);
 
-export const SINGLE_DURATION_OPTIONS: DurationOption[] = [4, 6, 10];
-export const COLLABORATIVE_DURATION_OPTIONS: DurationOption[] = [15, 20, 30];
+export const SINGLE_DURATION_OPTIONS: DurationOption[] = [4, 6, 10, 15];
+export const COLLABORATIVE_DURATION_OPTIONS: DurationOption[] = [20, 30];
 export const ASPECT_RATIO_OPTIONS: AspectRatioOption[] = [
   "16:9",
   "9:16",
@@ -16,11 +16,11 @@ export const ASPECT_RATIO_OPTIONS: AspectRatioOption[] = [
 export function isCollaborativeDuration(
   value: unknown
 ): value is DurationOption {
-  return value === 15 || value === 20 || value === 30;
+  return value === 20 || value === 30;
 }
 
 export function isSingleDuration(value: unknown): value is DurationOption {
-  return value === 4 || value === 6 || value === 10;
+  return value === 4 || value === 6 || value === 10 || value === 15;
 }
 
 export function isDurationOption(value: unknown): value is DurationOption {
