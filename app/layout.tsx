@@ -46,6 +46,18 @@ export default function RootLayout({
                 New
               </Link>
               <Link
+                href="/wallpapers"
+                className="btn-secondary px-3 py-2 text-xs sm:text-sm"
+              >
+                Wallpapers
+              </Link>
+              <Link
+                href="/finance"
+                className="btn-secondary px-3 py-2 text-xs sm:text-sm"
+              >
+                Finance
+              </Link>
+              <Link
                 href="/history"
                 className="btn-secondary px-3 py-2 text-xs sm:text-sm"
               >

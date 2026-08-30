@@ -1,0 +1,16 @@
+{
+  "name": "ImageToVideo",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "npm run dev"
+    }
+  ],
+  "ports": [
+    {
+      "name": "Next.js dev server",
+      "port": 9090
+    }
+  ]
+}
