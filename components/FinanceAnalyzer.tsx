@@ -5,6 +5,56 @@ import type { FinanceAnalysis } from "@/lib/finance/analyze";
 import { SAMPLE_STATEMENT } from "@/lib/finance/sample";
 import { FinanceResults } from "./FinanceResults";
 
+// tesseract.js is loaded from its CDN (its intended browser usage) rather than
+// bundled, which avoids Next.js dynamic-chunk loading issues and keeps it off
+// the initial page bundle. It also self-configures its worker/core/lang assets.
+const TESSERACT_CDN =
+  "https://cdn.jsdelivr.net/npm/[email protected]/dist/tesseract.min.js";
+
+interface TesseractWorker {
+  recognize: (image: File | string) => Promise<{ data: { text: string } }>;
+  terminate: () => Promise<unknown>;
+}
+
+interface TesseractGlobal {
+  createWorker: (
+    langs: string,
+    oem?: number,
+    options?: { logger?: (m: { status: string; progress: number }) => void }
+  ) => Promise<TesseractWorker>;
+}
+
+function loadTesseract(): Promise<TesseractGlobal> {
+  const w = window as unknown as { Tesseract?: TesseractGlobal };
+  if (w.Tesseract) {
+    return Promise.resolve(w.Tesseract);
+  }
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(
+      `script[src="${TESSERACT_CDN}"]`
+    );
+    const onReady = () => {
+      if (w.Tesseract) resolve(w.Tesseract);
+      else reject(new Error("OCR library loaded but was unavailable."));
+    };
+    if (existing) {
+      existing.addEventListener("load", onReady, { once: true });
+      existing.addEventListener(
+        "error",
+        () => reject(new Error("Failed to load the OCR library.")),
+        { once: true }
+      );
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = TESSERACT_CDN;
+    script.async = true;
+    script.onload = onReady;
+    script.onerror = () => reject(new Error("Failed to load the OCR library."));
+    document.head.appendChild(script);
+  });
+}
+
 type Status =
   | { kind: "idle" }
   | { kind: "reading"; label: string }
@@ -50,7 +100,7 @@ export function FinanceAnalyzer() {
   async function runImageOcr(file: File): Promise<string> {
     setStatus({ kind: "reading", label: "Reading screenshot with OCR" });
     setOcrProgress(0);
-    const Tesseract = await import("tesseract.js");
+    const Tesseract = await loadTesseract();
     const worker = await Tesseract.createWorker("eng", 1, {
       logger: (m: { status: string; progress: number }) => {
         if (m.status === "recognizing text") {
