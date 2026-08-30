@@ -1,0 +1,42 @@
+# Guardian configuration (all fields optional; sensible defaults apply).
+
+# How often to sample the screen / active window, in seconds.
+scan_interval_seconds: 3
+
+# Read on-screen text via OCR (works in any app: browser, Instagram, etc.).
+screen_scan: true
+# Also inspect the clipboard (what you copy / are about to paste or write).
+clipboard_scan: true
+
+# Message shown on the block overlay.
+block_message: "This content is blocked. Take a breath and step away."
+
+# Adult-content detection tuning.
+soft_threshold: 3
+extra_hard_terms: []          # add site-specific words to always block
+extra_soft_terms: {}          # e.g. {"suggestive": 1}
+extra_domains:                # extra adult sites to block
+  - example-adult-site.com
+# allow_context:              # phrases that soften ambiguous words (uncomment to override)
+#   - "sex education"
+
+# Enforcement actions when something is blocked.
+enforcement:
+  overlay: true               # fullscreen block screen
+  close_window: true          # close the offending window/tab
+  hosts_block: false          # add adult domains to /etc/hosts (needs admin)
+  cooldown_seconds: 8
+
+# Per-app / per-site time budgets. When the daily limit is hit, the app/site is
+# blocked for the rest of the day. `match` is matched against the app name and
+# window title (case-insensitive substring).
+budgets:
+  - name: Instagram
+    match: ["instagram"]
+    daily_minutes: 30
+  - name: YouTube
+    match: ["youtube"]
+    daily_minutes: 45
+  - name: TikTok
+    match: ["tiktok"]
+    daily_minutes: 20
