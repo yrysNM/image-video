@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/api";
 import { analyzeText, type FinanceAnalysis } from "@/lib/finance/analyze";
+import { ocrImage } from "@/lib/finance/ocr";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 
 const MAX_TEXT_LENGTH = 200_000;
-const MAX_PDF_BYTES = 15 * 1024 * 1024;
+const MAX_FILE_BYTES = 15 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 async function extractPdfText(file: File): Promise<string> {
   const bytes = Buffer.from(await file.arrayBuffer());
@@ -40,20 +43,27 @@ export async function POST(
       if (typeof textField === "string" && textField.trim()) {
         text = textField;
       } else if (file instanceof File && file.size > 0) {
-        if (file.size > MAX_PDF_BYTES) {
+        if (file.size > MAX_FILE_BYTES) {
           return jsonError("File is too large (max 15MB).", 400, "VALIDATION");
         }
-        const isPdf =
-          file.type === "application/pdf" ||
-          file.name.toLowerCase().endsWith(".pdf");
-        if (!isPdf) {
+        const name = file.name.toLowerCase();
+        const isPdf = file.type === "application/pdf" || name.endsWith(".pdf");
+        const isImage =
+          ALLOWED_IMAGE_TYPES.includes(file.type) ||
+          /\.(png|jpe?g|webp)$/.test(name);
+
+        if (isPdf) {
+          text = await extractPdfText(file);
+        } else if (isImage) {
+          const bytes = Buffer.from(await file.arrayBuffer());
+          text = await ocrImage(bytes);
+        } else {
           return jsonError(
-            "Only PDF files are parsed on the server. Images are read in your browser.",
+            "Upload a PNG/JPG screenshot or a PDF statement.",
             400,
             "VALIDATION"
           );
         }
-        text = await extractPdfText(file);
       }
     }
 

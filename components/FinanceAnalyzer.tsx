@@ -5,56 +5,6 @@ import type { FinanceAnalysis } from "@/lib/finance/analyze";
 import { SAMPLE_STATEMENT } from "@/lib/finance/sample";
 import { FinanceResults } from "./FinanceResults";
 
-// tesseract.js is loaded from its CDN (its intended browser usage) rather than
-// bundled, which avoids Next.js dynamic-chunk loading issues and keeps it off
-// the initial page bundle. It also self-configures its worker/core/lang assets.
-const TESSERACT_CDN =
-  "https://cdn.jsdelivr.net/npm/[email protected]/dist/tesseract.min.js";
-
-interface TesseractWorker {
-  recognize: (image: File | string) => Promise<{ data: { text: string } }>;
-  terminate: () => Promise<unknown>;
-}
-
-interface TesseractGlobal {
-  createWorker: (
-    langs: string,
-    oem?: number,
-    options?: { logger?: (m: { status: string; progress: number }) => void }
-  ) => Promise<TesseractWorker>;
-}
-
-function loadTesseract(): Promise<TesseractGlobal> {
-  const w = window as unknown as { Tesseract?: TesseractGlobal };
-  if (w.Tesseract) {
-    return Promise.resolve(w.Tesseract);
-  }
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(
-      `script[src="${TESSERACT_CDN}"]`
-    );
-    const onReady = () => {
-      if (w.Tesseract) resolve(w.Tesseract);
-      else reject(new Error("OCR library loaded but was unavailable."));
-    };
-    if (existing) {
-      existing.addEventListener("load", onReady, { once: true });
-      existing.addEventListener(
-        "error",
-        () => reject(new Error("Failed to load the OCR library.")),
-        { once: true }
-      );
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = TESSERACT_CDN;
-    script.async = true;
-    script.onload = onReady;
-    script.onerror = () => reject(new Error("Failed to load the OCR library."));
-    document.head.appendChild(script);
-  });
-}
-
 type Status =
   | { kind: "idle" }
   | { kind: "reading"; label: string }
@@ -62,12 +12,8 @@ type Status =
   | { kind: "done" }
   | { kind: "error"; message: string };
 
-async function analyzeText(text: string): Promise<FinanceAnalysis> {
-  const res = await fetch("/api/finance/analyze", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
+async function postAnalyze(init: RequestInit): Promise<FinanceAnalysis> {
+  const res = await fetch("/api/finance/analyze", { method: "POST", ...init });
   const body = (await res.json().catch(() => null)) as
     | { analysis?: FinanceAnalysis; error?: string }
     | null;
@@ -77,65 +23,44 @@ async function analyzeText(text: string): Promise<FinanceAnalysis> {
   return body.analysis;
 }
 
-async function analyzePdf(file: File): Promise<FinanceAnalysis> {
+function analyzeText(text: string): Promise<FinanceAnalysis> {
+  return postAnalyze({
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+}
+
+function analyzeFile(file: File): Promise<FinanceAnalysis> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch("/api/finance/analyze", { method: "POST", body: form });
-  const body = (await res.json().catch(() => null)) as
-    | { analysis?: FinanceAnalysis; error?: string }
-    | null;
-  if (!res.ok || !body?.analysis) {
-    throw new Error(body?.error || `Analysis failed (${res.status}).`);
-  }
-  return body.analysis;
+  return postAnalyze({ body: form });
 }
 
 export function FinanceAnalyzer() {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
-  const [ocrProgress, setOcrProgress] = useState(0);
   const [analysis, setAnalysis] = useState<FinanceAnalysis | null>(null);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  async function runImageOcr(file: File): Promise<string> {
-    setStatus({ kind: "reading", label: "Reading screenshot with OCR" });
-    setOcrProgress(0);
-    const Tesseract = await loadTesseract();
-    const worker = await Tesseract.createWorker("eng", 1, {
-      logger: (m: { status: string; progress: number }) => {
-        if (m.status === "recognizing text") {
-          setOcrProgress(Math.round(m.progress * 100));
-        }
-      },
-    });
-    try {
-      const {
-        data: { text },
-      } = await worker.recognize(file);
-      return text;
-    } finally {
-      await worker.terminate();
-    }
-  }
 
   async function handleFile(file: File) {
     setAnalysis(null);
     try {
       const isPdf =
         file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-      const isImage = file.type.startsWith("image/");
+      const isImage =
+        file.type.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(file.name);
 
-      let result: FinanceAnalysis;
-      if (isPdf) {
-        setStatus({ kind: "reading", label: "Extracting text from PDF" });
-        result = await analyzePdf(file);
-      } else if (isImage) {
-        const text = await runImageOcr(file);
-        setStatus({ kind: "analyzing" });
-        result = await analyzeText(text);
-      } else {
+      if (!isPdf && !isImage) {
         throw new Error("Please upload a PNG/JPG screenshot or a PDF statement.");
       }
+
+      setStatus({
+        kind: "reading",
+        label: isPdf
+          ? "Extracting text from PDF"
+          : "Reading screenshot with OCR (first run downloads a language model)",
+      });
+      const result = await analyzeFile(file);
       setAnalysis(result);
       setStatus({ kind: "done" });
     } catch (err) {
@@ -219,16 +144,16 @@ export function FinanceAnalyzer() {
             Try a sample statement
           </button>
           {busy && (
-            <span className="text-sm text-slate-500">
-              {status.kind === "reading" ? status.label : "Analyzing"}
-              {status.kind === "reading" && ocrProgress > 0 ? ` … ${ocrProgress}%` : "…"}
+            <span className="inline-flex items-center gap-2 text-sm text-slate-500">
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-teal-600" />
+              {status.kind === "reading" ? status.label : "Analyzing"}…
             </span>
           )}
         </div>
 
         <p className="text-xs text-slate-400">
-          Your document is processed only to extract transactions. Images never leave
-          your browser; PDFs are sent to the app only to read their text.
+          Your document is used only to extract transactions for this analysis. Nothing
+          is stored — screenshots are read with OCR and PDFs are parsed for their text.
         </p>
       </div>
 
