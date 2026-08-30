@@ -159,6 +159,7 @@ export interface BuildWallpapersOptions {
   theme: string;
   source: WallpaperSource;
   salt: string;
+  offset?: number;
 }
 
 export async function buildWallpapers({
@@ -166,14 +167,16 @@ export async function buildWallpapers({
   theme,
   source,
   salt,
+  offset = 0,
 }: BuildWallpapersOptions): Promise<Wallpaper[]> {
   const quotes = await getQuotes(count);
   const cleanTheme = theme.trim();
   return quotes.map((quote, index) => {
-    const seed = `${cleanTheme || "muse"}-${salt}-${index}`;
+    const itemIndex = offset + index;
+    const seed = `${cleanTheme || "muse"}-${salt}-${itemIndex}`;
     const remoteUrl = remoteImageUrl(source, cleanTheme, seed);
     return {
-      id: `${salt}-${index}`,
+      id: `${salt}-${itemIndex}`,
       imageUrl: proxiedImageUrl(remoteUrl),
       remoteUrl,
       source,

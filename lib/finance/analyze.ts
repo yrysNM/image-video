@@ -29,6 +29,17 @@ export interface SavingsOpportunity {
   note: string;
 }
 
+export interface VolumeAnalysis {
+  expenseCount: number;
+  incomeCount: number;
+  averageExpenseAmount: number;
+  averageIncomeAmount: number;
+  averageDailySpending: number;
+  averageDailyIncome: number;
+  daysWithTransactions: number;
+  busiestSpendingDay: { date: string; total: number } | null;
+}
+
 export interface FinanceAnalysis {
   currency: string;
   totalIncome: number;
@@ -43,6 +54,7 @@ export interface FinanceAnalysis {
   biggestCategory: CategoryTotal | null;
   savingsOpportunities: SavingsOpportunity[];
   totalPotentialSaving: number;
+  volumeAnalysis: VolumeAnalysis;
   transactions: Transaction[];
 }
 
@@ -73,6 +85,7 @@ const CATEGORY_KEYWORDS: Array<{ category: string; keywords: string[] }> = [
     keywords: [
       "grocery", "supermarket", "whole foods", "trader joe", "safeway", "kroger",
       "aldi", "costco", "walmart", "market", "publix", "wegmans", "sprouts",
+      "magnum", "small", "arbuz", "ramstore", "metro gross", "ашан",
     ],
   },
   {
@@ -92,6 +105,8 @@ const CATEGORY_KEYWORDS: Array<{ category: string; keywords: string[] }> = [
     keywords: [
       "uber", "lyft", "gas", "shell", "chevron", "exxon", "fuel", "parking",
       "transit", "metro", "train", "bus ", "toll", "bp ", "76 ", "arco",
+      "yandex", "indriver", "in driver", "bolt", "тaxi", "заправка", "benzin",
+      "helicopter", "helix",
     ],
   },
   {
@@ -115,6 +130,7 @@ const CATEGORY_KEYWORDS: Array<{ category: string; keywords: string[] }> = [
     keywords: [
       "amazon", "target", "best buy", "nike", "apple store", "ikea", "etsy",
       "ebay", "macy", "nordstrom", "shop", "store", "h&m", "zara", "sephora",
+      "kaspi", "sulpak", "technodom", "mechta", "fix price", "marwin",
     ],
   },
   {
@@ -122,6 +138,7 @@ const CATEGORY_KEYWORDS: Array<{ category: string; keywords: string[] }> = [
     keywords: [
       "electric", "water bill", "gas bill", "internet", "comcast", "xfinity",
       "at&t", "verizon", "t-mobile", "utility", "phone bill", "spectrum", "pg&e",
+      "beeline", "kcell", "tele2", "altel", "activ", "internet kz", "коммунал",
     ],
   },
   {
@@ -151,6 +168,7 @@ const CATEGORY_KEYWORDS: Array<{ category: string; keywords: string[] }> = [
 const INCOME_HINTS = [
   "payroll", "salary", "direct deposit", "deposit", "refund", "reimbursement",
   "interest earned", "cashback", "dividend", "credit",
+  "зарплата", "заработная", "перевод от", "поступление", "возврат",
 ];
 
 const EXPENSE_HINTS = [
@@ -167,11 +185,29 @@ function detectCategory(description: string): string {
   return OTHER_CATEGORY;
 }
 
-const AMOUNT_REGEX =
-  /(\()?\s*(-|–|\+)?\s*\$?\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{2}))\s*(\))?\s*(cr|dr)?/gi;
+const AMOUNT_REGEX_US =
+  /(\()?\s*(-|–|\+)?\s*(?:\$|USD)?\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{2}))\s*(?:\$|USD)?\s*(\))?\s*(cr|dr)?/gi;
+
+/** Kazakh / European-style amounts: 12 450,00 ₸ or KZT 850000,00 */
+const AMOUNT_REGEX_KZT =
+  /(\()?\s*(-|–|\+)?\s*(?:₸|KZT|тг\.?|тенге)?\s*(\d{1,3}(?:[\s\u00a0]\d{3})+|\d+)(?:[,.](\d{2}))?\s*(?:₸|KZT|тг\.?|тенге)?\s*(\))?\s*(cr|dr)?/gi;
 
 const DATE_REGEX =
-  /\b(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\d{4}-\d{2}-\d{2}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:,?\s*\d{4})?)\b/i;
+  /\b(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?|\d{4}-\d{2}-\d{2}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:,?\s*\d{4})?)\b/i;
+
+export function detectCurrency(rawText: string): string {
+  const sample = rawText.slice(0, 8000);
+  if (/₸|\bKZT\b/i.test(sample) || /тенге|тг\b/i.test(sample)) {
+    return "₸";
+  }
+  if (/€|\bEUR\b/i.test(sample)) {
+    return "€";
+  }
+  if (/£|\bGBP\b/i.test(sample)) {
+    return "£";
+  }
+  return "$";
+}
 
 interface ParsedAmount {
   value: number;
@@ -181,31 +217,54 @@ interface ParsedAmount {
   length: number;
 }
 
-function lastAmountInLine(line: string): ParsedAmount | null {
-  let match: RegExpExecArray | null;
-  let last: ParsedAmount | null = null;
-  AMOUNT_REGEX.lastIndex = 0;
-  while ((match = AMOUNT_REGEX.exec(line)) !== null) {
-    const [full, openParen, sign, intPart, decPart, closeParen, crdr] = match;
-    const numeric = Number(`${intPart.replace(/,/g, "")}.${decPart}`);
-    if (!Number.isFinite(numeric)) {
-      continue;
-    }
-    const negative =
-      Boolean(openParen && closeParen) ||
-      sign === "-" ||
-      sign === "–" ||
-      (crdr ? crdr.toLowerCase() === "dr" : false);
-    const positiveMarked = sign === "+" || (crdr ? crdr.toLowerCase() === "cr" : false);
-    last = {
-      value: numeric,
-      negative,
-      positiveMarked,
-      index: match.index,
-      length: full.length,
-    };
+function parseAmountMatch(
+  match: RegExpExecArray,
+  intNormalizer: (value: string) => string
+): ParsedAmount | null {
+  const [full, openParen, sign, intPart, decPart, closeParen, crdr] = match;
+  const normalizedInt = intNormalizer(intPart);
+  const numeric = Number(`${normalizedInt}.${decPart ?? "00"}`);
+  if (!Number.isFinite(numeric)) {
+    return null;
   }
-  return last;
+  const negative =
+    Boolean(openParen && closeParen) ||
+    sign === "-" ||
+    sign === "–" ||
+    (crdr ? crdr.toLowerCase() === "dr" : false);
+  const positiveMarked = sign === "+" || (crdr ? crdr.toLowerCase() === "cr" : false);
+  return {
+    value: numeric,
+    negative,
+    positiveMarked,
+    index: match.index,
+    length: full.length,
+  };
+}
+
+function lastAmountInLine(line: string): ParsedAmount | null {
+  const candidates: ParsedAmount[] = [];
+
+  for (const regex of [AMOUNT_REGEX_US, AMOUNT_REGEX_KZT]) {
+    let match: RegExpExecArray | null;
+    regex.lastIndex = 0;
+    while ((match = regex.exec(line)) !== null) {
+      const parsed =
+        regex === AMOUNT_REGEX_KZT
+          ? parseAmountMatch(match, (value) => value.replace(/[\s\u00a0]/g, ""))
+          : parseAmountMatch(match, (value) => value.replace(/,/g, ""));
+      if (parsed) {
+        candidates.push(parsed);
+      }
+    }
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+  return candidates.reduce((best, current) =>
+    current.index >= best.index ? current : best
+  );
 }
 
 /**
@@ -290,6 +349,52 @@ function round(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+function computeVolumeAnalysis(
+  transactions: Transaction[],
+  totalIncome: number,
+  totalSpending: number
+): VolumeAnalysis {
+  const expenses = transactions.filter((t) => t.type === "expense");
+  const incomes = transactions.filter((t) => t.type === "income");
+
+  const spendingByDay = new Map<string, number>();
+  for (const t of transactions) {
+    if (!t.date || t.type !== "expense") {
+      continue;
+    }
+    const entry = spendingByDay.get(t.date) ?? 0;
+    spendingByDay.set(t.date, entry + Math.abs(t.amount));
+  }
+
+  const daysWithTransactions = new Set(
+    transactions.map((t) => t.date).filter((d): d is string => Boolean(d))
+  ).size;
+
+  let busiestSpendingDay: VolumeAnalysis["busiestSpendingDay"] = null;
+  for (const [date, total] of spendingByDay.entries()) {
+    if (!busiestSpendingDay || total > busiestSpendingDay.total) {
+      busiestSpendingDay = { date, total: round(total) };
+    }
+  }
+
+  const expenseCount = expenses.length;
+  const incomeCount = incomes.length;
+
+  return {
+    expenseCount,
+    incomeCount,
+    averageExpenseAmount:
+      expenseCount > 0 ? round(totalSpending / expenseCount) : 0,
+    averageIncomeAmount: incomeCount > 0 ? round(totalIncome / incomeCount) : 0,
+    averageDailySpending:
+      daysWithTransactions > 0 ? round(totalSpending / daysWithTransactions) : 0,
+    averageDailyIncome:
+      daysWithTransactions > 0 ? round(totalIncome / daysWithTransactions) : 0,
+    daysWithTransactions,
+    busiestSpendingDay,
+  };
+}
+
 export function analyze(
   transactions: Transaction[],
   currency = "$"
@@ -369,6 +474,8 @@ export function analyze(
     savingsOpportunities.reduce((sum, o) => sum + o.suggestedSaving, 0)
   );
 
+  const volumeAnalysis = computeVolumeAnalysis(transactions, totalIncome, totalSpending);
+
   return {
     currency,
     totalIncome,
@@ -383,10 +490,12 @@ export function analyze(
     biggestCategory: spendingByCategory[0] ?? null,
     savingsOpportunities,
     totalPotentialSaving,
+    volumeAnalysis,
     transactions,
   };
 }
 
-export function analyzeText(rawText: string, currency = "$"): FinanceAnalysis {
-  return analyze(parseTransactions(rawText), currency);
+export function analyzeText(rawText: string, currency?: string): FinanceAnalysis {
+  const resolvedCurrency = currency ?? detectCurrency(rawText);
+  return analyze(parseTransactions(rawText), resolvedCurrency);
 }

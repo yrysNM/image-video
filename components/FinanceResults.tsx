@@ -71,7 +71,70 @@ export function FinanceResults({ analysis }: FinanceResultsProps) {
         {analysis.dateRange
           ? ` · ${analysis.dateRange.start} → ${analysis.dateRange.end}`
           : ""}
+        {analysis.currency !== "$" ? ` · ${analysis.currency}` : ""}
       </p>
+
+      {/* Volume analysis */}
+      <div className="card space-y-4">
+        <h2
+          className="text-lg font-semibold text-slate-900"
+          style={{ fontFamily: "var(--font-display), serif" }}
+        >
+          Volume analysis
+        </h2>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              Avg expense
+            </p>
+            <p className="mt-1 text-lg font-semibold tabular-nums text-slate-800">
+              {fmt(analysis.volumeAnalysis.averageExpenseAmount)}
+            </p>
+            <p className="text-xs text-slate-400">
+              {analysis.volumeAnalysis.expenseCount} payments
+            </p>
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              Avg income
+            </p>
+            <p className="mt-1 text-lg font-semibold tabular-nums text-teal-700">
+              {fmt(analysis.volumeAnalysis.averageIncomeAmount)}
+            </p>
+            <p className="text-xs text-slate-400">
+              {analysis.volumeAnalysis.incomeCount} deposits
+            </p>
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              Daily spending
+            </p>
+            <p className="mt-1 text-lg font-semibold tabular-nums text-rose-600">
+              {fmt(analysis.volumeAnalysis.averageDailySpending)}
+            </p>
+            <p className="text-xs text-slate-400">
+              over {analysis.volumeAnalysis.daysWithTransactions} days
+            </p>
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              Busiest day
+            </p>
+            {analysis.volumeAnalysis.busiestSpendingDay ? (
+              <>
+                <p className="mt-1 text-lg font-semibold tabular-nums text-slate-800">
+                  {fmt(analysis.volumeAnalysis.busiestSpendingDay.total)}
+                </p>
+                <p className="text-xs text-slate-400">
+                  {analysis.volumeAnalysis.busiestSpendingDay.date}
+                </p>
+              </>
+            ) : (
+              <p className="mt-1 text-sm text-slate-400">—</p>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Where you spend a lot */}
       <div className="card space-y-4">

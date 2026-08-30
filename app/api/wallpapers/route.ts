@@ -21,18 +21,39 @@ function parseSource(raw: string | null): WallpaperSource {
   return raw === "photo" ? "photo" : "ai";
 }
 
+function parseOffset(raw: string | null): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    return 0;
+  }
+  return Math.round(value);
+}
+
+function parseSalt(raw: string | null): string | undefined {
+  const value = raw?.trim();
+  if (!value || !/^[a-z0-9]{4,12}$/i.test(value)) {
+    return undefined;
+  }
+  return value;
+}
+
 export async function GET(
   request: Request
-): Promise<NextResponse<{ items: Wallpaper[] } | { error: string; code?: string }>> {
+): Promise<
+  NextResponse<
+    { items: Wallpaper[]; salt: string; offset: number } | { error: string; code?: string }
+  >
+> {
   try {
     const params = new URL(request.url).searchParams;
     const count = parseCount(params.get("count"));
     const theme = (params.get("theme") ?? "").slice(0, MAX_THEME_LENGTH);
     const source = parseSource(params.get("source"));
-    const salt = Math.random().toString(36).slice(2, 8);
+    const offset = parseOffset(params.get("offset"));
+    const salt = parseSalt(params.get("salt")) ?? Math.random().toString(36).slice(2, 8);
 
-    const items = await buildWallpapers({ count, theme, source, salt });
-    return NextResponse.json({ items });
+    const items = await buildWallpapers({ count, theme, source, salt, offset });
+    return NextResponse.json({ items, salt, offset });
   } catch (error) {
     console.error("GET /api/wallpapers", error);
     return jsonError("Failed to build wallpapers.", 500, "INTERNAL");

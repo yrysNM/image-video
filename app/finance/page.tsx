@@ -4,7 +4,7 @@ import { FinanceAnalyzer } from "@/components/FinanceAnalyzer";
 export const metadata: Metadata = {
   title: "Finance Analysis · ImageToVideo",
   description:
-    "Upload a bank screenshot or PDF statement to see where your money goes and where you can save.",
+    "Upload a bank screenshot or PDF statement to see spending breakdown, volume analysis, and savings — supports USD and Kazakhstani tenge (₸).",
 };
 
 export default function FinancePage() {
@@ -19,7 +19,8 @@ export default function FinancePage() {
         </h1>
         <p className="mt-2 max-w-xl text-slate-600">
           Upload a screenshot of your bank transactions or a PDF statement. You&apos;ll
-          get a breakdown of where you spend the most and where you could save.
+          get a breakdown of where you spend the most, tenge (₸) volume analysis for
+          KZT statements, and where you could save.
         </p>
       </div>
       <FinanceAnalyzer />

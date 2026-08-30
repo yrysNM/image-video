@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { FinanceAnalysis } from "@/lib/finance/analyze";
-import { SAMPLE_STATEMENT } from "@/lib/finance/sample";
+import { SAMPLE_KZT_STATEMENT, SAMPLE_STATEMENT } from "@/lib/finance/sample";
 import { FinanceResults } from "./FinanceResults";
 
 type Status =
@@ -61,6 +61,21 @@ export function FinanceAnalyzer() {
           : "Reading screenshot with OCR (first run downloads a language model)",
       });
       const result = await analyzeFile(file);
+      setAnalysis(result);
+      setStatus({ kind: "done" });
+    } catch (err) {
+      setStatus({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Something went wrong.",
+      });
+    }
+  }
+
+  async function handleSampleKzt() {
+    setAnalysis(null);
+    setStatus({ kind: "analyzing" });
+    try {
+      const result = await analyzeText(SAMPLE_KZT_STATEMENT);
       setAnalysis(result);
       setStatus({ kind: "done" });
     } catch (err) {
@@ -141,7 +156,15 @@ export function FinanceAnalyzer() {
             disabled={busy}
             className="btn-secondary"
           >
-            Try a sample statement
+            Try USD sample
+          </button>
+          <button
+            type="button"
+            onClick={handleSampleKzt}
+            disabled={busy}
+            className="btn-secondary"
+          >
+            Try tenge (₸) sample
           </button>
           {busy && (
             <span className="inline-flex items-center gap-2 text-sm text-slate-500">
