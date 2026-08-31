@@ -371,7 +371,7 @@ function computeVolumeAnalysis(
   ).size;
 
   let busiestSpendingDay: VolumeAnalysis["busiestSpendingDay"] = null;
-  for (const [date, total] of spendingByDay.entries()) {
+  for (const [date, total] of Array.from(spendingByDay.entries())) {
     if (!busiestSpendingDay || total > busiestSpendingDay.total) {
       busiestSpendingDay = { date, total: round(total) };
     }
