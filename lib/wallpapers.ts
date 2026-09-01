@@ -114,12 +114,27 @@ export async function getQuotes(count: number): Promise<Quote[]> {
   return result;
 }
 
-const PICSUM_HOST = "picsum.photos";
+const LOREMFLICKR_HOST = "loremflickr.com";
 const POLLINATIONS_HOST = "image.pollinations.ai";
+
+// Deterministic non-negative integer from a seed string, used as LoremFlickr's
+// `lock` so each card is stable and distinct across a generation.
+function seedLock(seed: string): number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return hash % 100000;
+}
 
 function remoteImageUrl(source: WallpaperSource, theme: string, seed: string): string {
   if (source === "photo") {
-    return `https://${PICSUM_HOST}/seed/${encodeURIComponent(seed)}/768/1024`;
+    // LoremFlickr serves real, theme-matched Creative Commons photos (keyless).
+    const words = theme.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const tags = (words.length ? words : ["nature", "landscape"])
+      .map(encodeURIComponent)
+      .join(",");
+    return `https://${LOREMFLICKR_HOST}/768/1024/${tags}?lock=${seedLock(seed)}`;
   }
   const subject = theme.trim() || "serene inspirational landscape";
   const prompt = `${subject}, cinematic, soft natural light, atmospheric, high detail, wallpaper, no text`;
@@ -138,9 +153,7 @@ export function proxiedImageUrl(remoteUrl: string): string {
 }
 
 const ALLOWED_IMAGE_HOSTS = new Set([
-  PICSUM_HOST,
-  "fastly.picsum.photos",
-  "i.picsum.photos",
+  LOREMFLICKR_HOST,
   POLLINATIONS_HOST,
 ]);
 
