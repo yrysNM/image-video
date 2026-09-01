@@ -1,3 +1,5 @@
+import { CATEGORY_QUOTES, type QuoteCategory } from "./quotes-data";
+
 export type WallpaperSource = "ai" | "photo";
 
 export interface Quote {
@@ -93,25 +95,39 @@ async function fetchZenQuotes(): Promise<Quote[]> {
   }
 }
 
+function fillFrom(pool: Quote[], count: number, fallback: Quote[]): Quote[] {
+  const shuffled = shuffle(pool);
+  const spare = shuffle(fallback);
+  const result: Quote[] = [];
+  for (let i = 0; i < count; i += 1) {
+    // Cycle through the (shuffled) pool when it's smaller than `count`.
+    result.push(shuffled[i % shuffled.length] ?? spare[i % spare.length]);
+  }
+  return result;
+}
+
 /**
- * Returns `count` quotes, preferring the free ZenQuotes API and falling back to
- * the bundled curated list if it is unavailable or rate-limited.
+ * Returns `count` quotes for a category.
+ * - "any": prefers the live ZenQuotes API, falling back to the bundled list.
+ * - other categories (life, time, love, …, books): drawn from curated,
+ *   category-specific collections so they always work and stay on-topic.
  */
-export async function getQuotes(count: number): Promise<Quote[]> {
+export async function getQuotes(
+  count: number,
+  category: QuoteCategory = "any"
+): Promise<Quote[]> {
+  if (category !== "any") {
+    const pool = CATEGORY_QUOTES[category] ?? CURATED_QUOTES;
+    return fillFrom(pool, count, CURATED_QUOTES);
+  }
+
   let pool: Quote[];
   try {
     pool = await fetchZenQuotes();
   } catch {
     pool = CURATED_QUOTES;
   }
-
-  const shuffled = shuffle(pool);
-  const result: Quote[] = [];
-  const fallback = shuffle(CURATED_QUOTES);
-  for (let i = 0; i < count; i += 1) {
-    result.push(shuffled[i] ?? fallback[i % fallback.length]);
-  }
-  return result;
+  return fillFrom(pool, count, CURATED_QUOTES);
 }
 
 const LOREMFLICKR_HOST = "loremflickr.com";
@@ -173,6 +189,7 @@ export interface BuildWallpapersOptions {
   source: WallpaperSource;
   salt: string;
   offset?: number;
+  category?: QuoteCategory;
 }
 
 export async function buildWallpapers({
@@ -181,8 +198,9 @@ export async function buildWallpapers({
   source,
   salt,
   offset = 0,
+  category = "any",
 }: BuildWallpapersOptions): Promise<Wallpaper[]> {
-  const quotes = await getQuotes(count);
+  const quotes = await getQuotes(count, category);
   const cleanTheme = theme.trim();
   return quotes.map((quote, index) => {
     const itemIndex = offset + index;

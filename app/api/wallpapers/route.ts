@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/api";
 import { buildWallpapers, type Wallpaper, type WallpaperSource } from "@/lib/wallpapers";
+import { QUOTE_CATEGORIES, type QuoteCategory } from "@/lib/quotes-data";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,12 @@ function parseOffset(raw: string | null): number {
   return Math.round(value);
 }
 
+function parseCategory(raw: string | null): QuoteCategory {
+  const value = (raw ?? "").toLowerCase();
+  const match = QUOTE_CATEGORIES.find((c) => c.value === value);
+  return match ? match.value : "any";
+}
+
 function parseSalt(raw: string | null): string | undefined {
   const value = raw?.trim();
   if (!value || !/^[a-z0-9]{4,12}$/i.test(value)) {
@@ -50,9 +57,10 @@ export async function GET(
     const theme = (params.get("theme") ?? "").slice(0, MAX_THEME_LENGTH);
     const source = parseSource(params.get("source"));
     const offset = parseOffset(params.get("offset"));
+    const category = parseCategory(params.get("category"));
     const salt = parseSalt(params.get("salt")) ?? Math.random().toString(36).slice(2, 8);
 
-    const items = await buildWallpapers({ count, theme, source, salt, offset });
+    const items = await buildWallpapers({ count, theme, source, salt, offset, category });
     return NextResponse.json({ items, salt, offset });
   } catch (error) {
     console.error("GET /api/wallpapers", error);
