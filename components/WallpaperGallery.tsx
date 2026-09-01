@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Wallpaper, WallpaperSource } from "@/lib/wallpapers";
+import { QUOTE_CATEGORIES, type QuoteCategory } from "@/lib/quotes-data";
 import { WallpaperCard } from "./WallpaperCard";
 
 const THEME_SUGGESTIONS = [
@@ -26,6 +27,7 @@ type WallpapersResponse = {
 export function WallpaperGallery() {
   const [theme, setTheme] = useState("");
   const [source, setSource] = useState<WallpaperSource>("ai");
+  const [category, setCategory] = useState<QuoteCategory>("any");
   const [items, setItems] = useState<Wallpaper[]>([]);
   const [salt, setSalt] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
@@ -34,14 +36,18 @@ export function WallpaperGallery() {
   const [error, setError] = useState<string | null>(null);
   const didInit = useRef(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
-  const requestParamsRef = useRef({ theme, source });
+  const requestParamsRef = useRef({ theme, source, category });
 
-  requestParamsRef.current = { theme, source };
+  requestParamsRef.current = { theme, source, category };
 
   const fetchWallpapers = useCallback(
     async (options: { append?: boolean; offset?: number; salt?: string | null } = {}) => {
       const append = options.append ?? false;
-      const { theme: nextTheme, source: nextSource } = requestParamsRef.current;
+      const {
+        theme: nextTheme,
+        source: nextSource,
+        category: nextCategory,
+      } = requestParamsRef.current;
       const offset = options.offset ?? 0;
       const nextSalt = append ? (options.salt ?? salt) : null;
 
@@ -58,6 +64,7 @@ export function WallpaperGallery() {
           count: String(PAGE_SIZE),
           source: nextSource,
           offset: String(offset),
+          category: nextCategory,
         });
         if (nextTheme.trim()) {
           params.set("theme", nextTheme.trim());
@@ -98,20 +105,28 @@ export function WallpaperGallery() {
   );
 
   const generate = useCallback(
-    (overrides?: { theme?: string; source?: WallpaperSource }) => {
+    (overrides?: {
+      theme?: string;
+      source?: WallpaperSource;
+      category?: QuoteCategory;
+    }) => {
       if (overrides?.theme !== undefined) {
         setTheme(overrides.theme);
       }
       if (overrides?.source !== undefined) {
         setSource(overrides.source);
       }
+      if (overrides?.category !== undefined) {
+        setCategory(overrides.category);
+      }
       requestParamsRef.current = {
         theme: overrides?.theme ?? theme,
         source: overrides?.source ?? source,
+        category: overrides?.category ?? category,
       };
       void fetchWallpapers({ append: false, offset: 0 });
     },
-    [fetchWallpapers, source, theme]
+    [fetchWallpapers, source, theme, category]
   );
 
   useEffect(() => {
@@ -210,6 +225,28 @@ export function WallpaperGallery() {
                 }`}
               >
                 {option === "ai" ? "AI art" : "Stock photo"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <span className="mb-2 block text-sm font-medium text-slate-700">
+            Quotes
+          </span>
+          <div className="flex flex-wrap gap-2">
+            {QUOTE_CATEGORIES.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => {
+                  generate({ category: option.value });
+                }}
+                className={`chip ${
+                  category === option.value ? "chip-active" : ""
+                }`}
+              >
+                {option.label}
               </button>
             ))}
           </div>
