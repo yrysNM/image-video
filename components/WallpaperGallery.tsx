@@ -251,7 +251,7 @@ export function WallpaperGallery() {
       )}
 
       <p className="text-center text-xs text-slate-400">
-        AI art via Pollinations · Stock photos via Lorem Picsum · Quotes via
+        AI art via Pollinations · Stock photos via LoremFlickr · Quotes via
         ZenQuotes — all free.
       </p>
     </div>
