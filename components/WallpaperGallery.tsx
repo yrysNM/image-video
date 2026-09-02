@@ -18,6 +18,25 @@ const THEME_SUGGESTIONS = [
 
 const PAGE_SIZE = 6;
 
+// Remember the user's last-picked quote category across visits.
+const CATEGORY_STORAGE_KEY = "imagetovideo:wallpaper-quote-category";
+
+function isQuoteCategory(value: string | null): value is QuoteCategory {
+  return !!value && QUOTE_CATEGORIES.some((c) => c.value === value);
+}
+
+function readStoredCategory(): QuoteCategory | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const stored = window.localStorage.getItem(CATEGORY_STORAGE_KEY);
+    return isQuoteCategory(stored) ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
 type WallpapersResponse = {
   items: Wallpaper[];
   salt: string;
@@ -134,8 +153,23 @@ export function WallpaperGallery() {
       return;
     }
     didInit.current = true;
+    // Restore the previously selected category (if any) before the first load.
+    const stored = readStoredCategory();
+    if (stored && stored !== "any") {
+      setCategory(stored);
+      requestParamsRef.current = { ...requestParamsRef.current, category: stored };
+    }
     void fetchWallpapers({ append: false, offset: 0 });
   }, [fetchWallpapers]);
+
+  // Persist the chosen category so it's restored on the next visit.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CATEGORY_STORAGE_KEY, category);
+    } catch {
+      // ignore (private mode / storage disabled)
+    }
+  }, [category]);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
