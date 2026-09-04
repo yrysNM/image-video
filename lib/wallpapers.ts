@@ -46,88 +46,81 @@ const CURATED_QUOTES: Quote[] = [
   { text: "Be like the flower that gives its fragrance even to the hand that crushes it.", author: "Ali ibn Abi Talib" },
 ];
 
-function shuffle<T>(input: T[]): T[] {
+// --- Deterministic, non-repeating quote selection -------------------------
+// Quotes come from a fixed, de-duplicated pool that is shuffled with a
+// per-generation seed (`salt`) and indexed by absolute position, so a gallery
+// never shows the same quote twice (until its pool is exhausted, which then
+// stops pagination).
+
+function dedupeByText(quotes: Quote[]): Quote[] {
+  const seen = new Set<string>();
+  const out: Quote[] = [];
+  for (const quote of quotes) {
+    const key = quote.text.trim().toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(quote);
+    }
+  }
+  return out;
+}
+
+// "Any" draws from every curated quote across all categories (a large, stable,
+// unique pool — no network dependency, so results are reliable and repeat-free).
+const ANY_POOL: Quote[] = dedupeByText([
+  ...CURATED_QUOTES,
+  ...Object.values(CATEGORY_QUOTES).flat(),
+]);
+
+function poolForCategory(category: QuoteCategory): Quote[] {
+  if (category === "any") {
+    return ANY_POOL;
+  }
+  return dedupeByText(CATEGORY_QUOTES[category] ?? ANY_POOL);
+}
+
+function hashString(value: string): number {
+  let hash = 2166136261 >>> 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(i), 16777619);
+  }
+  return hash >>> 0;
+}
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Deterministic Fisher–Yates shuffle seeded by a string. */
+function seededShuffle<T>(input: T[], seed: string): T[] {
   const arr = [...input];
+  const rand = mulberry32(hashString(seed));
   for (let i = arr.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rand() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
 }
 
-interface ZenQuote {
-  q?: unknown;
-  a?: unknown;
-}
-
-async function fetchZenQuotes(): Promise<Quote[]> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 6000);
-  try {
-    const res = await fetch("https://zenquotes.io/api/quotes", {
-      cache: "no-store",
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      throw new Error(`ZenQuotes responded ${res.status}`);
-    }
-    const data = (await res.json()) as ZenQuote[];
-    if (!Array.isArray(data)) {
-      throw new Error("Unexpected ZenQuotes payload");
-    }
-    const quotes = data
-      .map((item) => ({
-        text: typeof item.q === "string" ? item.q.trim() : "",
-        author: typeof item.a === "string" && item.a.trim() ? item.a.trim() : "Unknown",
-      }))
-      .filter(
-        (quote) =>
-          quote.text.length > 0 &&
-          !/too many requests/i.test(quote.text) &&
-          !/zenquotes\.io/i.test(quote.author)
-      );
-    if (quotes.length === 0) {
-      throw new Error("ZenQuotes returned no usable quotes");
-    }
-    return quotes;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function fillFrom(pool: Quote[], count: number, fallback: Quote[]): Quote[] {
-  const shuffled = shuffle(pool);
-  const spare = shuffle(fallback);
-  const result: Quote[] = [];
-  for (let i = 0; i < count; i += 1) {
-    // Cycle through the (shuffled) pool when it's smaller than `count`.
-    result.push(shuffled[i % shuffled.length] ?? spare[i % spare.length]);
-  }
-  return result;
-}
-
 /**
- * Returns `count` quotes for a category.
- * - "any": prefers the live ZenQuotes API, falling back to the bundled list.
- * - other categories (life, time, love, …, books): drawn from curated,
- *   category-specific collections so they always work and stay on-topic.
+ * Quotes for absolute positions [offset, offset + count) from a per-generation
+ * shuffled pool. No cycling: once the pool is exhausted the result is shorter
+ * (or empty), so every quote shown in a gallery is unique.
  */
-export async function getQuotes(
-  count: number,
-  category: QuoteCategory = "any"
-): Promise<Quote[]> {
-  if (category !== "any") {
-    const pool = CATEGORY_QUOTES[category] ?? CURATED_QUOTES;
-    return fillFrom(pool, count, CURATED_QUOTES);
-  }
-
-  let pool: Quote[];
-  try {
-    pool = await fetchZenQuotes();
-  } catch {
-    pool = CURATED_QUOTES;
-  }
-  return fillFrom(pool, count, CURATED_QUOTES);
+export function quotesForRange(
+  category: QuoteCategory,
+  salt: string,
+  offset: number,
+  count: number
+): Quote[] {
+  const ordered = seededShuffle(poolForCategory(category), salt);
+  return ordered.slice(offset, offset + count);
 }
 
 const LOREMFLICKR_HOST = "loremflickr.com";
@@ -200,8 +193,8 @@ export async function buildWallpapers({
   offset = 0,
   category = "any",
 }: BuildWallpapersOptions): Promise<Wallpaper[]> {
-  const quotes = await getQuotes(count, category);
   const cleanTheme = theme.trim();
+  const quotes = quotesForRange(category, salt, offset, count);
   return quotes.map((quote, index) => {
     const itemIndex = offset + index;
     const seed = `${cleanTheme || "muse"}-${salt}-${itemIndex}`;
