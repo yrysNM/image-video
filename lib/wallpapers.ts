@@ -126,34 +126,130 @@ export function quotesForRange(
 const LOREMFLICKR_HOST = "loremflickr.com";
 const POLLINATIONS_HOST = "image.pollinations.ai";
 
-// Deterministic non-negative integer from a seed string, used as LoremFlickr's
-// `lock` so each card is stable and distinct across a generation.
-function seedLock(seed: string): number {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  return hash % 100000;
+function photoTags(theme: string): string {
+  const words = theme.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return (words.length ? words : ["nature", "landscape"])
+    .map(encodeURIComponent)
+    .join(",");
 }
 
-function remoteImageUrl(source: WallpaperSource, theme: string, seed: string): string {
-  if (source === "photo") {
-    // LoremFlickr serves real, theme-matched Creative Commons photos (keyless).
-    const words = theme.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const tags = (words.length ? words : ["nature", "landscape"])
-      .map(encodeURIComponent)
-      .join(",");
-    return `https://${LOREMFLICKR_HOST}/768/1024/${tags}?lock=${seedLock(seed)}`;
-  }
+function loremflickrUrl(tags: string, lock: number): string {
+  return `https://${LOREMFLICKR_HOST}/768/1024/${tags}?lock=${lock}`;
+}
+
+// Pollinations requires an INTEGER `seed`; a non-numeric seed is silently
+// ignored, so every card sharing a prompt returns the *same* image. Deriving a
+// stable number from the per-card seed string gives each card a unique image.
+function aiImageUrl(theme: string, seed: string): string {
   const subject = theme.trim() || "serene inspirational landscape";
   const prompt = `${subject}, cinematic, soft natural light, atmospheric, high detail, wallpaper, no text`;
   const params = new URLSearchParams({
     width: "768",
     height: "1024",
     nologo: "true",
-    seed,
+    seed: String(hashString(seed)),
   });
   return `https://${POLLINATIONS_HOST}/prompt/${encodeURIComponent(prompt)}?${params.toString()}`;
+}
+
+// --- Unique photo selection ------------------------------------------------
+// LoremFlickr maps some `lock` values to a shared "defaultImage" placeholder
+// and can repeat photos, so we resolve each lock's redirect target server-side,
+// drop the placeholder, and de-duplicate by resolved image. Results are cached
+// per generation (theme + salt) as an ordered, growing list, so infinite-scroll
+// pages never repeat a photo either.
+interface PhotoList {
+  urls: string[];
+  used: Set<string>;
+  nextLock: number;
+  probes: number;
+}
+
+const photoCache = new Map<string, PhotoList>();
+
+async function resolvePhotoTarget(
+  tags: string,
+  lock: number
+): Promise<string | null> {
+  const url = loremflickrUrl(tags, lock);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(url, {
+      redirect: "manual",
+      signal: controller.signal,
+    });
+    const location = res.headers.get("location");
+    if (!location) {
+      return res.ok ? url : null;
+    }
+    const resolved = new URL(location, `https://${LOREMFLICKR_HOST}`).toString();
+    if (resolved.includes("defaultImage")) {
+      return null;
+    }
+    return resolved;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fillPhotoList(
+  entry: PhotoList,
+  tags: string,
+  target: number
+): Promise<void> {
+  const maxProbes = target * 6 + 60;
+  while (entry.urls.length < target && entry.probes < maxProbes) {
+    const need = target - entry.urls.length;
+    const batch = Math.min(Math.max(need * 2, 4), 16);
+    const locks: number[] = [];
+    for (let i = 0; i < batch; i += 1) {
+      locks.push(entry.nextLock);
+      entry.nextLock = (entry.nextLock + 1) % 100000;
+      entry.probes += 1;
+    }
+    const results = await Promise.all(
+      locks.map((lock) => resolvePhotoTarget(tags, lock))
+    );
+    for (const resolved of results) {
+      if (entry.urls.length >= target) {
+        break;
+      }
+      if (resolved && !entry.used.has(resolved)) {
+        entry.used.add(resolved);
+        entry.urls.push(resolved);
+      }
+    }
+  }
+}
+
+/**
+ * Resolved, de-duplicated photo URLs for absolute positions
+ * [offset, offset + count). Stable per (theme, salt): infinite-scroll pages
+ * extend the same ordered list, so a gallery never shows the same photo twice.
+ */
+async function photoUrlsForRange(
+  theme: string,
+  salt: string,
+  offset: number,
+  count: number
+): Promise<string[]> {
+  const tags = photoTags(theme);
+  const key = `${tags}|${salt}`;
+  let entry = photoCache.get(key);
+  if (!entry) {
+    entry = {
+      urls: [],
+      used: new Set(),
+      nextLock: hashString(key) % 100000,
+      probes: 0,
+    };
+    photoCache.set(key, entry);
+  }
+  await fillPhotoList(entry, tags, offset + count);
+  return entry.urls.slice(offset, offset + count);
 }
 
 /** Same-origin proxy path so the browser can composite images onto a canvas. */
@@ -195,10 +291,22 @@ export async function buildWallpapers({
 }: BuildWallpapersOptions): Promise<Wallpaper[]> {
   const cleanTheme = theme.trim();
   const quotes = quotesForRange(category, salt, offset, count);
+
+  // Photos are resolved + de-duplicated server-side; AI images use a numeric
+  // seed. Either way, every card in a generation gets a distinct image.
+  const photoUrls =
+    source === "photo" && quotes.length > 0
+      ? await photoUrlsForRange(cleanTheme, salt, offset, quotes.length)
+      : [];
+
   return quotes.map((quote, index) => {
     const itemIndex = offset + index;
     const seed = `${cleanTheme || "muse"}-${salt}-${itemIndex}`;
-    const remoteUrl = remoteImageUrl(source, cleanTheme, seed);
+    const remoteUrl =
+      source === "photo"
+        ? photoUrls[index] ??
+          loremflickrUrl(photoTags(cleanTheme), hashString(seed) % 100000)
+        : aiImageUrl(cleanTheme, seed);
     return {
       id: `${salt}-${itemIndex}`,
       imageUrl: proxiedImageUrl(remoteUrl),
