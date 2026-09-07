@@ -224,6 +224,10 @@ export function WallpaperGallery() {
               {loading ? "Generating…" : "Generate wallpapers"}
             </button>
           </div>
+          <p className="mt-2 text-xs text-slate-400">
+            Each image is picked to match its quote&apos;s meaning. Add a theme
+            to blend in a scene, or leave it blank.
+          </p>
           <div className="mt-3 flex flex-wrap gap-2">
             {THEME_SUGGESTIONS.map((suggestion) => (
               <button

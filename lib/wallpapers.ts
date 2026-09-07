@@ -126,11 +126,130 @@ export function quotesForRange(
 const LOREMFLICKR_HOST = "loremflickr.com";
 const POLLINATIONS_HOST = "image.pollinations.ai";
 
-function photoTags(theme: string): string {
-  const words = theme.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  return (words.length ? words : ["nature", "landscape"])
-    .map(encodeURIComponent)
-    .join(",");
+// --- Quote → image subject -------------------------------------------------
+// Each image is chosen to reflect the *meaning of its quote*. We scan the quote
+// for evocative words and map them to photo-friendly subjects (comma-separated
+// tags that LoremFlickr has plenty of matches for, and which double as an AI
+// prompt subject). Concrete imagery ("sea", "tree", "stars") wins over abstract
+// themes ("time", "wisdom"); if nothing matches we fall back to the selected
+// category's mood, then to a generic natural scene.
+
+// Concrete, literal imagery mentioned in the quote — the strongest match.
+const CONCRETE_SUBJECTS: Record<string, string> = {
+  sea: "ocean,sea", ocean: "ocean,sea", sail: "sailboat,ocean", sailor: "sailboat,ocean",
+  boat: "boat,ocean", boats: "boat,ocean", wave: "ocean,waves", waves: "ocean,waves",
+  tide: "ocean,coast", shore: "coast,ocean", current: "ocean,waves",
+  tree: "forest,tree", trees: "forest,trees", plant: "forest,plant", forest: "forest,trees",
+  leaf: "forest,leaves", leaves: "forest,leaves", roots: "forest,roots", wood: "forest,woods",
+  flower: "flowers,garden", flowers: "flowers,garden", bloom: "flowers,blossom",
+  blossom: "blossom,flowers", garden: "garden,flowers", fragrance: "flowers,garden",
+  rose: "rose,flowers", petal: "flowers,blossom",
+  star: "stars,night,sky", stars: "stars,night,sky", cosmos: "stars,galaxy",
+  universe: "stars,galaxy", galaxy: "stars,galaxy", moon: "moon,night,sky",
+  night: "night,sky,stars", dark: "night,sky", darkness: "night,sky", shadow: "shadow,light",
+  shadows: "shadow,light",
+  sun: "sunrise,sun", sunshine: "sunshine,meadow", sunrise: "sunrise,sky",
+  sunset: "sunset,sky", dawn: "dawn,sunrise", dusk: "dusk,sunset", daylight: "sunlight,sky",
+  mountain: "mountains", mountains: "mountains", peak: "mountains,peak", peaks: "mountains,peak",
+  summit: "mountains,summit", climb: "mountains,climbing", hill: "hills,landscape",
+  cliff: "cliff,coast",
+  sky: "sky,clouds", cloud: "clouds,sky", clouds: "clouds,sky", horizon: "horizon,sky",
+  rain: "rain,storm", storm: "storm,clouds", thunder: "storm,lightning",
+  snow: "snow,mountains", ice: "ice,winter", winter: "winter,snow", frost: "frost,winter",
+  river: "river,water", stream: "stream,water", lake: "lake,water", waterfall: "waterfall,water",
+  water: "water,river",
+  road: "road,path", path: "path,forest", trail: "trail,mountains", journey: "path,journey",
+  wander: "path,forest", steps: "stairs,path", step: "stairs,path", footsteps: "path,sand",
+  bird: "bird,sky", birds: "birds,sky", wings: "bird,wings", fly: "bird,sky",
+  flight: "bird,sky", caged: "bird,cage",
+  fire: "fire,flames", flame: "fire,flames", spark: "sparks,fire", light: "light,glow",
+  candle: "candle,light",
+  book: "books,library", books: "books,library", read: "books,reading", story: "books,library",
+  pages: "book,pages", novel: "books,library", library: "library,books", words: "book,writing",
+  written: "book,writing", write: "writing,book",
+  heart: "heart,love", desert: "desert,dunes", dune: "desert,dunes", sand: "desert,sand",
+  labyrinth: "maze,labyrinth", maze: "maze,labyrinth", bridge: "bridge,architecture",
+  door: "door,architecture", key: "key,door",
+};
+
+// Abstract themes → a fitting visual metaphor.
+const ABSTRACT_SUBJECTS: Record<string, string> = {
+  life: "sunrise,landscape", live: "sunrise,landscape", living: "sunrise,landscape",
+  alive: "sunrise,landscape",
+  time: "clock,hourglass", hour: "clock,hourglass", hours: "clock,hourglass",
+  minute: "clock,hourglass", today: "sunrise,horizon", tomorrow: "sunrise,horizon",
+  yesterday: "sunset,horizon", clock: "clock,hourglass",
+  love: "sunset,ocean", loved: "sunset,ocean", loving: "sunset,ocean",
+  success: "mountains,summit", achieve: "mountains,summit", opportunity: "mountains,summit",
+  opportunities: "mountains,summit", victory: "mountains,summit",
+  wisdom: "library,books", wise: "library,books", knowledge: "library,books",
+  learn: "library,books", reflection: "calm,lake", mind: "calm,lake",
+  courage: "mountains", brave: "mountains", strength: "mountains", strong: "mountains",
+  fear: "mountains,fog", fearless: "mountains",
+  happy: "meadow,sunshine", happiness: "meadow,sunshine", happiest: "meadow,sunshine",
+  joy: "meadow,sunshine", smile: "meadow,sunshine", smiles: "meadow,sunshine",
+  enjoy: "meadow,sunshine",
+  dream: "clouds,sky", dreams: "clouds,sky", imagine: "clouds,sky", imagination: "clouds,sky",
+  peace: "lake,calm", calm: "lake,calm", patience: "lake,calm", patient: "lake,calm",
+  quiet: "lake,calm", quieter: "lake,calm", listen: "lake,calm", silence: "lake,calm",
+  hope: "sunrise,horizon", future: "sunrise,horizon", believe: "sunrise,horizon",
+  faith: "sunrise,horizon",
+  adventure: "mountains,trail", explore: "mountains,trail", discover: "mountains,trail",
+  past: "forest,fog", memory: "forest,fog", memories: "forest,fog",
+  suffering: "mountains,fog", wounds: "mountains,fog", broken: "mountains,fog",
+  agony: "mountains,fog", pain: "mountains,fog",
+};
+
+const CATEGORY_SUBJECTS: Record<Exclude<QuoteCategory, "any">, string> = {
+  life: "sunrise,landscape",
+  time: "clock,hourglass",
+  love: "sunset,ocean",
+  success: "mountains,summit",
+  wisdom: "library,books",
+  motivation: "mountains,trail",
+  happiness: "meadow,sunshine",
+  books: "library,books",
+};
+
+const DEFAULT_SUBJECT = "nature,landscape";
+
+function quoteWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/** Picks image tags that reflect a quote's meaning (concrete > abstract > category). */
+function subjectForQuote(quote: Quote, category: QuoteCategory): string {
+  const words = quoteWords(quote.text);
+  for (const word of words) {
+    if (CONCRETE_SUBJECTS[word]) {
+      return CONCRETE_SUBJECTS[word];
+    }
+  }
+  for (const word of words) {
+    if (ABSTRACT_SUBJECTS[word]) {
+      return ABSTRACT_SUBJECTS[word];
+    }
+  }
+  if (category !== "any" && CATEGORY_SUBJECTS[category]) {
+    return CATEGORY_SUBJECTS[category];
+  }
+  return DEFAULT_SUBJECT;
+}
+
+/** LoremFlickr tag string = quote subject, optionally biased by a user theme. */
+function photoTags(subject: string, theme: string): string {
+  const parts = [
+    ...subject.split(","),
+    ...theme.trim().toLowerCase().split(/\s+/),
+  ]
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const unique = Array.from(new Set(parts)).map(encodeURIComponent);
+  return (unique.length ? unique : ["nature", "landscape"]).join(",");
 }
 
 function loremflickrUrl(tags: string, lock: number): string {
@@ -140,9 +259,12 @@ function loremflickrUrl(tags: string, lock: number): string {
 // Pollinations requires an INTEGER `seed`; a non-numeric seed is silently
 // ignored, so every card sharing a prompt returns the *same* image. Deriving a
 // stable number from the per-card seed string gives each card a unique image.
-function aiImageUrl(theme: string, seed: string): string {
-  const subject = theme.trim() || "serene inspirational landscape";
-  const prompt = `${subject}, cinematic, soft natural light, atmospheric, high detail, wallpaper, no text`;
+function aiImageUrl(subject: string, theme: string, seed: string): string {
+  const scene = [subject.split(",").join(" "), theme.trim()]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(", ");
+  const prompt = `${scene || "serene inspirational landscape"}, cinematic, soft natural light, atmospheric, high detail, wallpaper, no text`;
   const params = new URLSearchParams({
     width: "768",
     height: "1024",
@@ -154,18 +276,20 @@ function aiImageUrl(theme: string, seed: string): string {
 
 // --- Unique photo selection ------------------------------------------------
 // LoremFlickr maps some `lock` values to a shared "defaultImage" placeholder
-// and can repeat photos, so we resolve each lock's redirect target server-side,
-// drop the placeholder, and de-duplicate by resolved image. Results are cached
-// per generation (theme + salt) as an ordered, growing list, so infinite-scroll
-// pages never repeat a photo either.
-interface PhotoList {
-  urls: string[];
-  used: Set<string>;
-  nextLock: number;
-  probes: number;
-}
+// and can repeat photos, so we resolve each lock's redirect server-side and drop
+// the placeholder. Because several quotes can map to the same subject, we also
+// de-duplicate by resolved image across the whole generation (per salt), so a
+// gallery never shows the same photo twice — even across infinite-scroll pages.
+const photoUsedCache = new Map<string, Set<string>>();
 
-const photoCache = new Map<string, PhotoList>();
+function usedSetFor(salt: string): Set<string> {
+  let used = photoUsedCache.get(salt);
+  if (!used) {
+    used = new Set();
+    photoUsedCache.set(salt, used);
+  }
+  return used;
+}
 
 async function resolvePhotoTarget(
   tags: string,
@@ -195,61 +319,50 @@ async function resolvePhotoTarget(
   }
 }
 
-async function fillPhotoList(
-  entry: PhotoList,
-  tags: string,
-  target: number
-): Promise<void> {
-  const maxProbes = target * 6 + 60;
-  while (entry.urls.length < target && entry.probes < maxProbes) {
-    const need = target - entry.urls.length;
-    const batch = Math.min(Math.max(need * 2, 4), 16);
-    const locks: number[] = [];
-    for (let i = 0; i < batch; i += 1) {
-      locks.push(entry.nextLock);
-      entry.nextLock = (entry.nextLock + 1) % 100000;
-      entry.probes += 1;
-    }
-    const results = await Promise.all(
-      locks.map((lock) => resolvePhotoTarget(tags, lock))
-    );
-    for (const resolved of results) {
-      if (entry.urls.length >= target) {
-        break;
-      }
-      if (resolved && !entry.used.has(resolved)) {
-        entry.used.add(resolved);
-        entry.urls.push(resolved);
-      }
-    }
-  }
-}
+const PHOTO_CANDIDATES = 8;
 
 /**
- * Resolved, de-duplicated photo URLs for absolute positions
- * [offset, offset + count). Stable per (theme, salt): infinite-scroll pages
- * extend the same ordered list, so a gallery never shows the same photo twice.
+ * One quote-relevant, unique photo URL per quote. Each quote's subject drives
+ * its tags; candidate locks are resolved in parallel and the first resolved
+ * image not already used in this generation is chosen.
  */
-async function photoUrlsForRange(
+async function photosForQuotes(
+  quotes: Quote[],
   theme: string,
+  category: QuoteCategory,
   salt: string,
-  offset: number,
-  count: number
+  offset: number
 ): Promise<string[]> {
-  const tags = photoTags(theme);
-  const key = `${tags}|${salt}`;
-  let entry = photoCache.get(key);
-  if (!entry) {
-    entry = {
-      urls: [],
-      used: new Set(),
-      nextLock: hashString(key) % 100000,
-      probes: 0,
-    };
-    photoCache.set(key, entry);
-  }
-  await fillPhotoList(entry, tags, offset + count);
-  return entry.urls.slice(offset, offset + count);
+  const used = usedSetFor(salt);
+  const specs = quotes.map((quote, index) => {
+    const subject = subjectForQuote(quote, category);
+    const tags = photoTags(subject, theme);
+    const base = hashString(`${salt}|${tags}|${offset + index}`) % 100000;
+    const locks = Array.from(
+      { length: PHOTO_CANDIDATES },
+      (_, step) => (base + step) % 100000
+    );
+    return { tags, locks };
+  });
+
+  const resolvedPerCard = await Promise.all(
+    specs.map((spec) =>
+      Promise.all(spec.locks.map((lock) => resolvePhotoTarget(spec.tags, lock)))
+    )
+  );
+
+  return specs.map((spec, index) => {
+    for (const resolved of resolvedPerCard[index]) {
+      if (resolved && !used.has(resolved)) {
+        used.add(resolved);
+        return resolved;
+      }
+    }
+    // Fall back to a direct lock URL (network hiccup / very sparse subject).
+    const fallback = loremflickrUrl(spec.tags, spec.locks[0]);
+    used.add(fallback);
+    return fallback;
+  });
 }
 
 /** Same-origin proxy path so the browser can composite images onto a canvas. */
@@ -292,21 +405,23 @@ export async function buildWallpapers({
   const cleanTheme = theme.trim();
   const quotes = quotesForRange(category, salt, offset, count);
 
-  // Photos are resolved + de-duplicated server-side; AI images use a numeric
-  // seed. Either way, every card in a generation gets a distinct image.
+  // Every image reflects the meaning of its own quote. Photos are resolved +
+  // de-duplicated server-side; AI images use a quote-derived prompt with a
+  // numeric seed. Either way, each card gets a distinct, on-topic image.
   const photoUrls =
     source === "photo" && quotes.length > 0
-      ? await photoUrlsForRange(cleanTheme, salt, offset, quotes.length)
+      ? await photosForQuotes(quotes, cleanTheme, category, salt, offset)
       : [];
 
   return quotes.map((quote, index) => {
     const itemIndex = offset + index;
-    const seed = `${cleanTheme || "muse"}-${salt}-${itemIndex}`;
+    const subject = subjectForQuote(quote, category);
+    const seed = `${subject}-${cleanTheme || "muse"}-${salt}-${itemIndex}`;
     const remoteUrl =
       source === "photo"
         ? photoUrls[index] ??
-          loremflickrUrl(photoTags(cleanTheme), hashString(seed) % 100000)
-        : aiImageUrl(cleanTheme, seed);
+          loremflickrUrl(photoTags(subject, cleanTheme), hashString(seed) % 100000)
+        : aiImageUrl(subject, cleanTheme, seed);
     return {
       id: `${salt}-${itemIndex}`,
       imageUrl: proxiedImageUrl(remoteUrl),
