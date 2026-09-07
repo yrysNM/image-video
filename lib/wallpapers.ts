@@ -46,11 +46,11 @@ const CURATED_QUOTES: Quote[] = [
   { text: "Be like the flower that gives its fragrance even to the hand that crushes it.", author: "Ali ibn Abi Talib" },
 ];
 
-// --- Deterministic, non-repeating quote selection -------------------------
+// --- Deterministic quote selection ----------------------------------------
 // Quotes come from a fixed, de-duplicated pool that is shuffled with a
-// per-generation seed (`salt`) and indexed by absolute position, so a gallery
-// never shows the same quote twice (until its pool is exhausted, which then
-// stops pagination).
+// per-generation seed (`salt`) and indexed by absolute position. Pagination
+// loops: once the pool is exhausted, selection wraps so infinite scroll never
+// runs out. Within a single pass the order stays unique.
 
 function dedupeByText(quotes: Quote[]): Quote[] {
   const seen = new Set<string>();
@@ -110,8 +110,8 @@ function seededShuffle<T>(input: T[], seed: string): T[] {
 
 /**
  * Quotes for absolute positions [offset, offset + count) from a per-generation
- * shuffled pool. No cycling: once the pool is exhausted the result is shorter
- * (or empty), so every quote shown in a gallery is unique.
+ * shuffled pool. Selection wraps when the pool ends so each page can always
+ * fill `count` items (empty pool → empty result).
  */
 export function quotesForRange(
   category: QuoteCategory,
@@ -120,7 +120,15 @@ export function quotesForRange(
   count: number
 ): Quote[] {
   const ordered = seededShuffle(poolForCategory(category), salt);
-  return ordered.slice(offset, offset + count);
+  if (ordered.length === 0 || count <= 0) {
+    return [];
+  }
+  const start = ((offset % ordered.length) + ordered.length) % ordered.length;
+  const result: Quote[] = [];
+  for (let i = 0; i < count; i += 1) {
+    result.push(ordered[(start + i) % ordered.length]);
+  }
+  return result;
 }
 
 const LOREMFLICKR_HOST = "loremflickr.com";
@@ -279,14 +287,25 @@ function aiImageUrl(subject: string, theme: string, seed: string): string {
 // and can repeat photos, so we resolve each lock's redirect server-side and drop
 // the placeholder. Because several quotes can map to the same subject, we also
 // de-duplicate by resolved image across the whole generation (per salt), so a
-// gallery never shows the same photo twice — even across infinite-scroll pages.
+// gallery never shows the same photo twice within a quote-pool pass. Each
+// wrap-around cycle gets a fresh uniqueness set so looping pagination can
+// keep resolving photos without an unbounded cache.
 const photoUsedCache = new Map<string, Set<string>>();
+const PHOTO_USED_CACHE_LIMIT = 48;
 
-function usedSetFor(salt: string): Set<string> {
-  let used = photoUsedCache.get(salt);
+function usedSetFor(salt: string, cycle: number): Set<string> {
+  const key = `${salt}:${cycle}`;
+  let used = photoUsedCache.get(key);
   if (!used) {
     used = new Set();
-    photoUsedCache.set(salt, used);
+    photoUsedCache.set(key, used);
+    while (photoUsedCache.size > PHOTO_USED_CACHE_LIMIT) {
+      const oldest = photoUsedCache.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      photoUsedCache.delete(oldest);
+    }
   }
   return used;
 }
@@ -333,7 +352,9 @@ async function photosForQuotes(
   salt: string,
   offset: number
 ): Promise<string[]> {
-  const used = usedSetFor(salt);
+  const poolSize = poolForCategory(category).length;
+  const cycle = poolSize > 0 ? Math.floor(Math.max(0, offset) / poolSize) : 0;
+  const used = usedSetFor(salt, cycle);
   const specs = quotes.map((quote, index) => {
     const subject = subjectForQuote(quote, category);
     const tags = photoTags(subject, theme);

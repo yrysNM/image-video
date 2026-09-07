@@ -41,6 +41,7 @@ type WallpapersResponse = {
   items: Wallpaper[];
   salt: string;
   offset: number;
+  hasMore?: boolean;
 };
 
 export function WallpaperGallery() {
@@ -55,6 +56,8 @@ export function WallpaperGallery() {
   const [error, setError] = useState<string | null>(null);
   const didInit = useRef(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const inFlightRef = useRef(false);
+  const requestGenRef = useRef(0);
   const requestParamsRef = useRef({ theme, source, category });
 
   requestParamsRef.current = { theme, source, category };
@@ -70,10 +73,20 @@ export function WallpaperGallery() {
       const offset = options.offset ?? 0;
       const nextSalt = append ? (options.salt ?? salt) : null;
 
+      if (append && inFlightRef.current) {
+        return;
+      }
+      if (!append) {
+        requestGenRef.current += 1;
+      }
+      const requestGen = requestGenRef.current;
+      inFlightRef.current = true;
+
       if (append) {
         setLoadingMore(true);
       } else {
         setLoading(true);
+        setLoadingMore(false);
         setHasMore(true);
       }
       setError(null);
@@ -103,20 +116,29 @@ export function WallpaperGallery() {
         }
 
         const data = (await res.json()) as WallpapersResponse;
+        if (requestGen !== requestGenRef.current) {
+          return;
+        }
         setSalt(data.salt);
-        setHasMore(data.items.length >= PAGE_SIZE);
+        setHasMore(data.hasMore ?? data.items.length > 0);
         setItems((current) => (append ? [...current, ...data.items] : data.items));
       } catch (err) {
+        if (requestGen !== requestGenRef.current) {
+          return;
+        }
         setError(err instanceof Error ? err.message : "Something went wrong.");
         if (!append) {
           setItems([]);
           setSalt(null);
         }
       } finally {
-        if (append) {
-          setLoadingMore(false);
-        } else {
-          setLoading(false);
+        if (requestGen === requestGenRef.current) {
+          inFlightRef.current = false;
+          if (append) {
+            setLoadingMore(false);
+          } else {
+            setLoading(false);
+          }
         }
       }
     },
