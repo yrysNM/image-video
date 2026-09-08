@@ -150,7 +150,7 @@ export function WallpaperGallery() {
         nextOffsetRef.current = append
           ? Math.max(nextOffsetRef.current, offset + incoming.length)
           : incoming.length;
-        setHasMore(Boolean(data.hasMore) && incoming.length > 0);
+        setHasMore((data.hasMore ?? incoming.length >= PAGE_SIZE) && incoming.length > 0);
       } catch (err) {
         if (requestGen !== requestGenRef.current) {
           return;
@@ -377,8 +377,8 @@ export function WallpaperGallery() {
       )}
 
       <p className="text-center text-xs text-slate-400">
-        AI art via Pollinations · Stock photos via LoremFlickr · Hand-picked
-        quotes — all free.
+        AI art via Pollinations · Stock photos via LoremFlickr · Quotes via
+        ZenQuotes, DummyJSON &amp; QuotesOnDesign — all free.
       </p>
     </div>
   );

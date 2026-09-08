@@ -1,4 +1,5 @@
 import { CATEGORY_QUOTES, type QuoteCategory } from "./quotes-data";
+import { fetchLiveQuotes, quoteMatchesCategory } from "./quotes-api";
 
 export type WallpaperSource = "ai" | "photo";
 
@@ -47,10 +48,10 @@ const CURATED_QUOTES: Quote[] = [
 ];
 
 // --- Deterministic, non-repeating quote selection -------------------------
-// Quotes come from a fixed, de-duplicated pool that is shuffled with a
-// per-generation seed (`salt`) and indexed by absolute position, so a gallery
-// never shows the same quote twice. Infinite scroll stops when the pool is
-// exhausted instead of wrapping.
+// Quotes come from a de-duplicated pool (bundled lists plus live public APIs)
+// shuffled with a per-generation seed (`salt`) and indexed by absolute
+// position, so a gallery never shows the same quote twice. Infinite scroll
+// stops when the pool is exhausted instead of wrapping.
 
 function dedupeByText(quotes: Quote[]): Quote[] {
   const seen = new Set<string>();
@@ -65,18 +66,57 @@ function dedupeByText(quotes: Quote[]): Quote[] {
   return out;
 }
 
-// "Any" draws from every curated quote across all categories (a large, stable,
-// unique pool — no network dependency, so results are reliable and repeat-free).
+// "Any" starts from every curated quote across all categories, then live APIs
+// add more unique lines when they are reachable.
 const ANY_POOL: Quote[] = dedupeByText([
   ...CURATED_QUOTES,
   ...Object.values(CATEGORY_QUOTES).flat(),
 ]);
 
-function poolForCategory(category: QuoteCategory): Quote[] {
+function bundledPool(category: QuoteCategory): Quote[] {
   if (category === "any") {
     return ANY_POOL;
   }
   return dedupeByText(CATEGORY_QUOTES[category] ?? ANY_POOL);
+}
+
+const CATEGORY_POOL_TTL_MS = 10 * 60 * 1000;
+const categoryPoolCache = new Map<
+  QuoteCategory,
+  { quotes: Quote[]; expires: number }
+>();
+const categoryPoolInflight = new Map<QuoteCategory, Promise<Quote[]>>();
+
+async function loadPoolForCategory(category: QuoteCategory): Promise<Quote[]> {
+  const bundled = bundledPool(category);
+  const live =
+    category === "books"
+      ? []
+      : (await fetchLiveQuotes()).filter((quote) =>
+          quoteMatchesCategory(quote, category)
+        );
+  const quotes = dedupeByText([...bundled, ...live]);
+  categoryPoolCache.set(category, {
+    quotes,
+    expires: Date.now() + CATEGORY_POOL_TTL_MS,
+  });
+  return quotes;
+}
+
+async function poolForCategory(category: QuoteCategory): Promise<Quote[]> {
+  const hit = categoryPoolCache.get(category);
+  if (hit && hit.expires > Date.now()) {
+    return hit.quotes;
+  }
+  const pending = categoryPoolInflight.get(category);
+  if (pending) {
+    return pending;
+  }
+  const work = loadPoolForCategory(category).finally(() => {
+    categoryPoolInflight.delete(category);
+  });
+  categoryPoolInflight.set(category, work);
+  return work;
 }
 
 function hashString(value: string): number {
@@ -108,8 +148,8 @@ function seededShuffle<T>(input: T[], seed: string): T[] {
   return arr;
 }
 
-export function quotePoolSize(category: QuoteCategory): number {
-  return poolForCategory(category).length;
+export async function quotePoolSize(category: QuoteCategory): Promise<number> {
+  return (await poolForCategory(category)).length;
 }
 
 /**
@@ -117,13 +157,13 @@ export function quotePoolSize(category: QuoteCategory): number {
  * shuffled pool. No cycling: once the pool is exhausted the result is shorter
  * (or empty), so every quote shown in a gallery is unique.
  */
-export function quotesForRange(
+export async function quotesForRange(
   category: QuoteCategory,
   salt: string,
   offset: number,
   count: number
-): Quote[] {
-  const ordered = seededShuffle(poolForCategory(category), salt);
+): Promise<Quote[]> {
+  const ordered = seededShuffle(await poolForCategory(category), salt);
   if (ordered.length === 0 || count <= 0 || offset >= ordered.length) {
     return [];
   }
@@ -419,7 +459,7 @@ export async function buildWallpapers({
   category = "any",
 }: BuildWallpapersOptions): Promise<Wallpaper[]> {
   const cleanTheme = theme.trim();
-  const quotes = quotesForRange(category, salt, offset, count);
+  const quotes = await quotesForRange(category, salt, offset, count);
 
   // Every image reflects the meaning of its own quote. Photos are resolved +
   // de-duplicated server-side; AI images use a quote-derived prompt with a
