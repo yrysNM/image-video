@@ -37,6 +37,26 @@ function readStoredCategory(): QuoteCategory | null {
   }
 }
 
+function quoteKey(quote: string): string {
+  return quote.trim().toLowerCase();
+}
+
+function uniqueWallpapers(current: Wallpaper[], incoming: Wallpaper[]): Wallpaper[] {
+  const seenIds = new Set(current.map((item) => item.id));
+  const seenQuotes = new Set(current.map((item) => quoteKey(item.quote)));
+  const extra: Wallpaper[] = [];
+  for (const item of incoming) {
+    const key = quoteKey(item.quote);
+    if (seenIds.has(item.id) || seenQuotes.has(key)) {
+      continue;
+    }
+    seenIds.add(item.id);
+    seenQuotes.add(key);
+    extra.push(item);
+  }
+  return extra;
+}
+
 type WallpapersResponse = {
   items: Wallpaper[];
   salt: string;
@@ -58,6 +78,7 @@ export function WallpaperGallery() {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const inFlightRef = useRef(false);
   const requestGenRef = useRef(0);
+  const nextOffsetRef = useRef(0);
   const requestParamsRef = useRef({ theme, source, category });
 
   requestParamsRef.current = { theme, source, category };
@@ -73,11 +94,12 @@ export function WallpaperGallery() {
       const offset = options.offset ?? 0;
       const nextSalt = append ? (options.salt ?? salt) : null;
 
-      if (append && inFlightRef.current) {
+      if (append && (inFlightRef.current || offset < nextOffsetRef.current)) {
         return;
       }
       if (!append) {
         requestGenRef.current += 1;
+        nextOffsetRef.current = 0;
       }
       const requestGen = requestGenRef.current;
       inFlightRef.current = true;
@@ -119,9 +141,16 @@ export function WallpaperGallery() {
         if (requestGen !== requestGenRef.current) {
           return;
         }
+        const incoming = data.items;
         setSalt(data.salt);
-        setHasMore(data.hasMore ?? data.items.length > 0);
-        setItems((current) => (append ? [...current, ...data.items] : data.items));
+        setItems((current) => {
+          const extra = uniqueWallpapers(append ? current : [], incoming);
+          return append ? [...current, ...extra] : extra;
+        });
+        nextOffsetRef.current = append
+          ? Math.max(nextOffsetRef.current, offset + incoming.length)
+          : incoming.length;
+        setHasMore(Boolean(data.hasMore) && incoming.length > 0);
       } catch (err) {
         if (requestGen !== requestGenRef.current) {
           return;
@@ -211,7 +240,7 @@ export function WallpaperGallery() {
         ) {
           return;
         }
-        void fetchWallpapers({ append: true, offset: items.length, salt });
+        void fetchWallpapers({ append: true, offset: nextOffsetRef.current, salt });
       },
       { rootMargin: "240px 0px" }
     );
