@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/api";
-import { buildWallpapers, type Wallpaper, type WallpaperSource } from "@/lib/wallpapers";
+import { buildWallpapers, quotePoolSize, type Wallpaper, type WallpaperSource } from "@/lib/wallpapers";
 import { QUOTE_CATEGORIES, type QuoteCategory } from "@/lib/quotes-data";
 
 export const runtime = "nodejs";
@@ -61,8 +61,8 @@ export async function GET(
     const salt = parseSalt(params.get("salt")) ?? Math.random().toString(36).slice(2, 8);
 
     const items = await buildWallpapers({ count, theme, source, salt, offset, category });
-    // Quote selection wraps, so a non-empty pool always fills the page.
-    return NextResponse.json({ items, salt, offset, hasMore: items.length > 0 });
+    const hasMore = offset + items.length < quotePoolSize(category);
+    return NextResponse.json({ items, salt, offset, hasMore });
   } catch (error) {
     console.error("GET /api/wallpapers", error);
     return jsonError("Failed to build wallpapers.", 500, "INTERNAL");
