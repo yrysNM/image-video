@@ -142,17 +142,15 @@ export function WallpaperGallery() {
           return;
         }
         const incoming = data.items;
-        let extraCount = 0;
         setSalt(data.salt);
         setItems((current) => {
           const extra = uniqueWallpapers(append ? current : [], incoming);
-          extraCount = extra.length;
           return append ? [...current, ...extra] : extra;
         });
         nextOffsetRef.current = append
           ? Math.max(nextOffsetRef.current, offset + incoming.length)
           : incoming.length;
-        setHasMore((data.hasMore ?? incoming.length >= PAGE_SIZE) && extraCount > 0);
+        setHasMore(Boolean(data.hasMore) && incoming.length > 0);
       } catch (err) {
         if (requestGen !== requestGenRef.current) {
           return;
