@@ -48,7 +48,7 @@ export async function GET(
   request: Request
 ): Promise<
   NextResponse<
-    { items: Wallpaper[]; salt: string; offset: number } | { error: string; code?: string }
+    { items: Wallpaper[]; salt: string; offset: number; hasMore: boolean } | { error: string; code?: string }
   >
 > {
   try {
@@ -61,7 +61,8 @@ export async function GET(
     const salt = parseSalt(params.get("salt")) ?? Math.random().toString(36).slice(2, 8);
 
     const items = await buildWallpapers({ count, theme, source, salt, offset, category });
-    return NextResponse.json({ items, salt, offset });
+    // Quote selection wraps, so a non-empty pool always fills the page.
+    return NextResponse.json({ items, salt, offset, hasMore: items.length > 0 });
   } catch (error) {
     console.error("GET /api/wallpapers", error);
     return jsonError("Failed to build wallpapers.", 500, "INTERNAL");

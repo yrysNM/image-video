@@ -19,8 +19,9 @@ export default function WallpapersPage() {
         </h1>
         <p className="mt-2 max-w-xl text-slate-600">
           Pick a theme and generate meaningful wallpapers — AI-painted or stock
-          photos — each paired with an inspiring quote. Scroll down to load more,
-          and download any as a ready-to-use image.
+          photos — each paired with an inspiring quote. Scroll down to keep
+          loading more; the gallery loops so it never runs out. Download any
+          as a ready-to-use image.
         </p>
       </div>
       <WallpaperGallery />
