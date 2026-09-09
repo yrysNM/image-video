@@ -61,7 +61,7 @@ export async function GET(
     const salt = parseSalt(params.get("salt")) ?? Math.random().toString(36).slice(2, 8);
 
     const items = await buildWallpapers({ count, theme, source, salt, offset, category });
-    const hasMore = offset + items.length < quotePoolSize(category);
+    const hasMore = offset + items.length < (await quotePoolSize(category));
     return NextResponse.json({ items, salt, offset, hasMore });
   } catch (error) {
     console.error("GET /api/wallpapers", error);

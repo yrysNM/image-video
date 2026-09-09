@@ -1,7 +1,8 @@
-// Curated quote collections by category. External topic APIs (Quotable, Quote
-// Garden) are unreliable/keyless-hostile, so these bundled sets guarantee the
-// category feature always works — including "books", for which no good free API
-// exists. For book quotes the `author` field is "Author, Book Title".
+// Curated quote collections by category. Live public APIs (ZenQuotes,
+// DummyJSON, QuotesOnDesign) expand the "Any" pool and themed categories when
+// they are reachable; these bundled sets keep the page working offline and
+// cover "books", which no good free topic API provides. For book quotes the
+// `author` field is "Author, Book Title".
 
 export interface CategoryQuote {
   text: string;
