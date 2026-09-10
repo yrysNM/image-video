@@ -65,6 +65,10 @@ export async function GET(
     return NextResponse.json({ items, salt, offset, hasMore });
   } catch (error) {
     console.error("GET /api/wallpapers", error);
+    const message = error instanceof Error ? error.message : "";
+    if (/quotes could not be fetched/i.test(message)) {
+      return jsonError("Quotes are unavailable right now. Please try again.", 503, "INTERNAL");
+    }
     return jsonError("Failed to build wallpapers.", 500, "INTERNAL");
   }
 }

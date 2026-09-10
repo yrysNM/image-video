@@ -15,7 +15,7 @@ const FAILURE_CACHE_TTL_MS = 30 * 1000;
 const MAX_QUOTE_LENGTH = 240;
 const MIN_QUOTE_LENGTH = 16;
 
-const CATEGORY_KEYWORDS: Record<Exclude<QuoteCategory, "any" | "books">, string[]> = {
+const CATEGORY_KEYWORDS: Record<Exclude<QuoteCategory, "any">, string[]> = {
   life: ["life", "live", "living", "lives"],
   time: ["time", "today", "tomorrow", "yesterday", "hour", "moment"],
   love: ["love", "loved", "loving", "heart"],
@@ -23,11 +23,27 @@ const CATEGORY_KEYWORDS: Record<Exclude<QuoteCategory, "any" | "books">, string[
   wisdom: ["wisdom", "wise", "knowledge", "know"],
   motivation: ["courage", "goal", "persist", "begin", "effort", "dream"],
   happiness: ["happy", "happiness", "happiest", "joy", "joyful", "smile"],
+  books: [
+    "book",
+    "books",
+    "read",
+    "reading",
+    "novel",
+    "library",
+    "author",
+    "page",
+    "pages",
+    "story",
+    "written",
+    "write",
+    "writing",
+  ],
 };
 
 interface CacheEntry {
   value: RemoteQuote[];
   expires: number;
+  failed?: boolean;
 }
 
 const cache = new Map<string, CacheEntry>();
@@ -95,15 +111,22 @@ async function cachedFetch(
 ): Promise<RemoteQuote[]> {
   const hit = cache.get(key);
   if (hit && hit.expires > Date.now()) {
+    if (hit.failed) {
+      throw new Error(`${key} recently failed`);
+    }
     return hit.value;
   }
   try {
     const value = await loader();
     cache.set(key, { value, expires: Date.now() + ttlMs });
     return value;
-  } catch {
-    cache.set(key, { value: [], expires: Date.now() + FAILURE_CACHE_TTL_MS });
-    return [];
+  } catch (error) {
+    cache.set(key, {
+      value: [],
+      expires: Date.now() + FAILURE_CACHE_TTL_MS,
+      failed: true,
+    });
+    throw error;
   }
 }
 
@@ -184,9 +207,6 @@ export function quoteMatchesCategory(
   if (category === "any") {
     return true;
   }
-  if (category === "books") {
-    return false;
-  }
   const keywords = CATEGORY_KEYWORDS[category];
   const haystack = `${quote.text} ${quote.author}`.toLowerCase();
   return keywords.some((word) => new RegExp(`\\b${word}\\b`, "i").test(haystack));
@@ -194,10 +214,11 @@ export function quoteMatchesCategory(
 
 /**
  * Live quotes from three keyless public APIs. Each source fails independently
- * and is cached so pagination can reuse one merged pool.
+ * and is cached so pagination can reuse one merged pool. Throws when every
+ * source fails so the gallery never falls back to bundled quotes.
  */
 export async function fetchLiveQuotes(): Promise<RemoteQuote[]> {
-  const [zen, dummyJson, quotesOnDesign] = await Promise.all([
+  const results = await Promise.allSettled([
     cachedFetch("zenquotes", LIVE_CACHE_TTL_MS, fetchZenQuotes),
     cachedFetch("dummyjson", LIVE_CACHE_TTL_MS, fetchDummyJsonQuotes),
     cachedFetch("quotesondesign", LIVE_CACHE_TTL_MS, fetchQuotesOnDesign),
@@ -205,13 +226,22 @@ export async function fetchLiveQuotes(): Promise<RemoteQuote[]> {
 
   const seen = new Set<string>();
   const merged: RemoteQuote[] = [];
-  for (const quote of [...zen, ...dummyJson, ...quotesOnDesign]) {
-    const key = quoteKey(quote.text);
-    if (seen.has(key)) {
+  for (const result of results) {
+    if (result.status !== "fulfilled") {
       continue;
     }
-    seen.add(key);
-    merged.push(quote);
+    for (const quote of result.value) {
+      const key = quoteKey(quote.text);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      merged.push(quote);
+    }
+  }
+
+  if (merged.length === 0) {
+    throw new Error("Quotes could not be fetched.");
   }
   return merged;
 }

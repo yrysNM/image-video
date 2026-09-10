@@ -1,4 +1,4 @@
-import { CATEGORY_QUOTES, type QuoteCategory } from "./quotes-data";
+import type { QuoteCategory } from "./quotes-data";
 import { fetchLiveQuotes, quoteMatchesCategory } from "./quotes-api";
 
 export type WallpaperSource = "ai" | "photo";
@@ -18,40 +18,10 @@ export interface Wallpaper {
   author: string;
 }
 
-// Bundled fallback so the page always works offline / when the free quote
-// service rate-limits us. Meaningful, public-domain-style motivational lines.
-const CURATED_QUOTES: Quote[] = [
-  { text: "The journey of a thousand miles begins with a single step.", author: "Lao Tzu" },
-  { text: "What we think, we become.", author: "Buddha" },
-  { text: "Do not go where the path may lead, go instead where there is no path and leave a trail.", author: "Ralph Waldo Emerson" },
-  { text: "In the middle of difficulty lies opportunity.", author: "Albert Einstein" },
-  { text: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
-  { text: "It always seems impossible until it's done.", author: "Nelson Mandela" },
-  { text: "Happiness is not something ready made. It comes from your own actions.", author: "Dalai Lama" },
-  { text: "The best time to plant a tree was twenty years ago. The second best time is now.", author: "Chinese Proverb" },
-  { text: "Whatever you are, be a good one.", author: "Abraham Lincoln" },
-  { text: "Turn your wounds into wisdom.", author: "Oprah Winfrey" },
-  { text: "The future belongs to those who believe in the beauty of their dreams.", author: "Eleanor Roosevelt" },
-  { text: "Simplicity is the ultimate sophistication.", author: "Leonardo da Vinci" },
-  { text: "Act as if what you do makes a difference. It does.", author: "William James" },
-  { text: "Keep your face always toward the sunshine and shadows will fall behind you.", author: "Walt Whitman" },
-  { text: "Everything you can imagine is real.", author: "Pablo Picasso" },
-  { text: "Wherever you go, go with all your heart.", author: "Confucius" },
-  { text: "Start where you are. Use what you have. Do what you can.", author: "Arthur Ashe" },
-  { text: "The mind is everything. What you think you become.", author: "Buddha" },
-  { text: "Little by little, one travels far.", author: "J.R.R. Tolkien" },
-  { text: "Stars can't shine without darkness.", author: "D.H. Sidebottom" },
-  { text: "Not all those who wander are lost.", author: "J.R.R. Tolkien" },
-  { text: "The quieter you become, the more you are able to hear.", author: "Rumi" },
-  { text: "A calm sea never made a skilled sailor.", author: "Franklin D. Roosevelt" },
-  { text: "Be like the flower that gives its fragrance even to the hand that crushes it.", author: "Ali ibn Abi Talib" },
-];
-
 // --- Deterministic, non-repeating quote selection -------------------------
-// Quotes come from a de-duplicated pool (bundled lists plus live public APIs)
-// shuffled with a per-generation seed (`salt`) and indexed by absolute
-// position, so a gallery never shows the same quote twice. Infinite scroll
-// stops when the pool is exhausted instead of wrapping.
+// Quotes come from live public APIs, shuffled with a per-generation seed
+// (`salt`) and indexed by absolute position, so a gallery never shows the
+// same quote twice. Infinite scroll stops when the pool is exhausted.
 
 function dedupeByText(quotes: Quote[]): Quote[] {
   const seen = new Set<string>();
@@ -66,20 +36,6 @@ function dedupeByText(quotes: Quote[]): Quote[] {
   return out;
 }
 
-// "Any" starts from every curated quote across all categories, then live APIs
-// add more unique lines when they are reachable.
-const ANY_POOL: Quote[] = dedupeByText([
-  ...CURATED_QUOTES,
-  ...Object.values(CATEGORY_QUOTES).flat(),
-]);
-
-function bundledPool(category: QuoteCategory): Quote[] {
-  if (category === "any") {
-    return ANY_POOL;
-  }
-  return dedupeByText(CATEGORY_QUOTES[category] ?? ANY_POOL);
-}
-
 const CATEGORY_POOL_TTL_MS = 10 * 60 * 1000;
 const categoryPoolCache = new Map<
   QuoteCategory,
@@ -88,14 +44,10 @@ const categoryPoolCache = new Map<
 const categoryPoolInflight = new Map<QuoteCategory, Promise<Quote[]>>();
 
 async function loadPoolForCategory(category: QuoteCategory): Promise<Quote[]> {
-  const bundled = bundledPool(category);
-  const live =
-    category === "books"
-      ? []
-      : (await fetchLiveQuotes()).filter((quote) =>
-          quoteMatchesCategory(quote, category)
-        );
-  const quotes = dedupeByText([...bundled, ...live]);
+  const live = (await fetchLiveQuotes()).filter((quote) =>
+    quoteMatchesCategory(quote, category)
+  );
+  const quotes = dedupeByText(live);
   categoryPoolCache.set(category, {
     quotes,
     expires: Date.now() + CATEGORY_POOL_TTL_MS,

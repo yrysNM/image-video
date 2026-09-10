@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Wallpaper, WallpaperSource } from "@/lib/wallpapers";
 import { QUOTE_CATEGORIES, type QuoteCategory } from "@/lib/quotes-data";
+import { NoInternetPage } from "./NoInternetPage";
 import { WallpaperCard } from "./WallpaperCard";
 
 const THEME_SUGGESTIONS = [
@@ -37,6 +38,23 @@ function readStoredCategory(): QuoteCategory | null {
   }
 }
 
+function isBrowserOffline(): boolean {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+
+function isNetworkError(err: unknown): boolean {
+  if (isBrowserOffline()) {
+    return true;
+  }
+  if (err instanceof TypeError) {
+    return true;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return /failed to fetch|networkerror|network request failed|load failed/i.test(
+    message
+  );
+}
+
 function quoteKey(quote: string): string {
   return quote.trim().toLowerCase();
 }
@@ -57,6 +75,24 @@ function uniqueWallpapers(current: Wallpaper[], incoming: Wallpaper[]): Wallpape
   return extra;
 }
 
+function WallpaperSkeleton() {
+  return (
+    <div className="relative aspect-[3/4] w-full overflow-hidden rounded-2xl bg-slate-200">
+      <div className="absolute inset-0 animate-pulse bg-gradient-to-b from-slate-200 via-slate-300/80 to-slate-400/60" />
+      <div className="absolute left-3 top-3 h-5 w-16 animate-pulse rounded-full bg-white/50" />
+      <div className="absolute inset-x-0 bottom-0 space-y-2 p-5">
+        <div className="h-5 w-11/12 animate-pulse rounded-lg bg-white/65" />
+        <div className="h-5 w-8/12 animate-pulse rounded-lg bg-white/50" />
+        <div className="mt-3 h-3 w-1/3 animate-pulse rounded-lg bg-white/40" />
+        <div className="mt-4 flex gap-2">
+          <div className="h-7 w-20 animate-pulse rounded-lg bg-white/55" />
+          <div className="h-7 w-24 animate-pulse rounded-lg bg-white/35" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type WallpapersResponse = {
   items: Wallpaper[];
   salt: string;
@@ -71,9 +107,10 @@ export function WallpaperGallery() {
   const [items, setItems] = useState<Wallpaper[]>([]);
   const [salt, setSalt] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
   const didInit = useRef(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const inFlightRef = useRef(false);
@@ -94,6 +131,16 @@ export function WallpaperGallery() {
       const offset = options.offset ?? 0;
       const nextSalt = append ? (options.salt ?? salt) : null;
 
+      if (isBrowserOffline()) {
+        setOffline(true);
+        setLoading(false);
+        setLoadingMore(false);
+        setItems([]);
+        setSalt(null);
+        setError(null);
+        return;
+      }
+
       if (append && (inFlightRef.current || offset < nextOffsetRef.current)) {
         return;
       }
@@ -110,8 +157,11 @@ export function WallpaperGallery() {
         setLoading(true);
         setLoadingMore(false);
         setHasMore(true);
+        setItems([]);
+        setSalt(null);
       }
       setError(null);
+      setOffline(false);
 
       try {
         const params = new URLSearchParams({
@@ -153,6 +203,13 @@ export function WallpaperGallery() {
         setHasMore((data.hasMore ?? incoming.length >= PAGE_SIZE) && incoming.length > 0);
       } catch (err) {
         if (requestGen !== requestGenRef.current) {
+          return;
+        }
+        if (isNetworkError(err)) {
+          setOffline(true);
+          setError(null);
+          setItems([]);
+          setSalt(null);
           return;
         }
         setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -210,6 +267,11 @@ export function WallpaperGallery() {
       setCategory(stored);
       requestParamsRef.current = { ...requestParamsRef.current, category: stored };
     }
+    if (isBrowserOffline()) {
+      setOffline(true);
+      setLoading(false);
+      return;
+    }
     void fetchWallpapers({ append: false, offset: 0 });
   }, [fetchWallpapers]);
 
@@ -223,8 +285,29 @@ export function WallpaperGallery() {
   }, [category]);
 
   useEffect(() => {
+    const handleOnline = () => {
+      setOffline(false);
+      void fetchWallpapers({ append: false, offset: 0 });
+    };
+    const handleOffline = () => {
+      setOffline(true);
+      setLoading(false);
+      setLoadingMore(false);
+      setItems([]);
+      setSalt(null);
+      setError(null);
+    };
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [fetchWallpapers]);
+
+  useEffect(() => {
     const sentinel = sentinelRef.current;
-    if (!sentinel || items.length === 0) {
+    if (!sentinel || items.length === 0 || offline) {
       return;
     }
 
@@ -247,10 +330,35 @@ export function WallpaperGallery() {
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [fetchWallpapers, hasMore, items.length, loading, loadingMore, salt]);
+  }, [fetchWallpapers, hasMore, items.length, loading, loadingMore, offline, salt]);
+
+  if (offline) {
+    return (
+      <NoInternetPage
+        onRetry={() => {
+          void fetchWallpapers({ append: false, offset: 0 });
+        }}
+      />
+    );
+  }
+
+  const showInitialSkeleton = loading && items.length === 0;
 
   return (
     <div className="space-y-6">
+      <div>
+        <h1
+          className="text-3xl font-semibold tracking-tight text-slate-900"
+          style={{ fontFamily: "var(--font-display), serif" }}
+        >
+          Quote wallpapers
+        </h1>
+        <p className="mt-2 max-w-xl text-slate-600">
+          Pick a theme and generate meaningful wallpapers — AI-painted or stock
+          photos — each paired with a live quote. Scroll down to load more
+          unique quotes, and download any as a ready-to-use image.
+        </p>
+      </div>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -272,7 +380,7 @@ export function WallpaperGallery() {
               className="field-input flex-1"
             />
             <button type="submit" className="btn-primary shrink-0" disabled={loading}>
-              {loading ? "Generating…" : "Generate wallpapers"}
+              {loading ? "Fetching quotes…" : "Generate wallpapers"}
             </button>
           </div>
           <p className="mt-2 text-xs text-slate-400">
@@ -348,13 +456,10 @@ export function WallpaperGallery() {
         </div>
       )}
 
-      {loading && items.length === 0 ? (
+      {showInitialSkeleton ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {Array.from({ length: PAGE_SIZE }).map((_, index) => (
-            <div
-              key={index}
-              className="aspect-[3/4] w-full animate-pulse rounded-2xl bg-slate-200"
-            />
+            <WallpaperSkeleton key={index} />
           ))}
         </div>
       ) : (
@@ -365,12 +470,15 @@ export function WallpaperGallery() {
             ))}
             {loadingMore &&
               Array.from({ length: PAGE_SIZE }).map((_, index) => (
-                <div
-                  key={`loading-more-${index}`}
-                  className="aspect-[3/4] w-full animate-pulse rounded-2xl bg-slate-200"
-                />
+                <WallpaperSkeleton key={`loading-more-${index}`} />
               ))}
           </div>
+
+          {!loading && items.length === 0 && !error && (
+            <div className="card text-center text-sm text-slate-600">
+              No live quotes matched this category. Try another one.
+            </div>
+          )}
 
           <div ref={sentinelRef} className="h-px" aria-hidden />
         </>
