@@ -18,10 +18,10 @@ export interface Wallpaper {
   author: string;
 }
 
-// --- Deterministic, non-repeating quote selection -------------------------
-// Quotes come from live public APIs, shuffled with a per-generation seed
-// (`salt`) and indexed by absolute position, so a gallery never shows the
-// same quote twice. Infinite scroll stops when the pool is exhausted.
+// --- Deterministic quote selection ----------------------------------------
+// Quotes come from DummyJSON's full paginated catalog (~1450+) merged with
+// other live sources, de-duplicated, shuffled per generation (`salt`), and
+// sliced by offset. No wrapping — each quote appears at most once per gallery.
 
 function dedupeByText(quotes: Quote[]): Quote[] {
   const seen = new Set<string>();
@@ -295,6 +295,13 @@ function usedSetFor(salt: string): Set<string> {
       }
       photoUsedCache.delete(oldest);
     }
+    while (photoUsedCache.size > PHOTO_USED_CACHE_LIMIT) {
+      const oldest = photoUsedCache.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      photoUsedCache.delete(oldest);
+    }
   }
   return used;
 }
@@ -428,7 +435,7 @@ export async function buildWallpapers({
     const remoteUrl =
       source === "photo"
         ? photoUrls[index] ??
-          loremflickrUrl(photoTags(subject, cleanTheme), hashString(seed) % 100000)
+        loremflickrUrl(photoTags(subject, cleanTheme), hashString(seed) % 100000)
         : aiImageUrl(subject, cleanTheme, seed);
     return {
       id: `${salt}-${itemIndex}`,

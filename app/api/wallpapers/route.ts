@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MIN_COUNT = 1;
-const MAX_COUNT = 12;
+const MAX_COUNT = 30;
 const MAX_THEME_LENGTH = 80;
 
 function parseCount(raw: string | null): number {
@@ -48,7 +48,8 @@ export async function GET(
   request: Request
 ): Promise<
   NextResponse<
-    { items: Wallpaper[]; salt: string; offset: number; hasMore: boolean } | { error: string; code?: string }
+    | { items: Wallpaper[]; salt: string; offset: number; nextOffset: number; hasMore: boolean }
+    | { error: string; code?: string }
   >
 > {
   try {
@@ -61,8 +62,9 @@ export async function GET(
     const salt = parseSalt(params.get("salt")) ?? Math.random().toString(36).slice(2, 8);
 
     const items = await buildWallpapers({ count, theme, source, salt, offset, category });
-    const hasMore = offset + items.length < (await quotePoolSize(category));
-    return NextResponse.json({ items, salt, offset, hasMore });
+    const nextOffset = offset + items.length;
+    const hasMore = nextOffset < (await quotePoolSize(category));
+    return NextResponse.json({ items, salt, offset, nextOffset, hasMore });
   } catch (error) {
     console.error("GET /api/wallpapers", error);
     const message = error instanceof Error ? error.message : "";
