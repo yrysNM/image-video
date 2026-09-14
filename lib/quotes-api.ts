@@ -5,14 +5,15 @@ export interface RemoteQuote {
   author: string;
 }
 
+const DUMMYJSON_QUOTES_URL = "https://dummyjson.com/quotes";
 const ZENQUOTES_URL = "https://zenquotes.io/api/quotes";
-const DUMMYJSON_URL = "https://dummyjson.com/quotes?limit=1500";
 const QUOTES_ON_DESIGN_URL =
   "https://quotesondesign.com/wp-json/wp/v2/posts?per_page=20";
 
 const LIVE_CACHE_TTL_MS = 30 * 60 * 1000;
 const FAILURE_CACHE_TTL_MS = 30 * 1000;
-const MAX_QUOTE_LENGTH = 240;
+const DUMMYJSON_BATCH_SIZE = 1500;
+const MAX_QUOTE_LENGTH = 320;
 const MIN_QUOTE_LENGTH = 16;
 
 const CATEGORY_KEYWORDS: Record<Exclude<QuoteCategory, "any">, string[]> = {
@@ -28,15 +29,32 @@ const CATEGORY_KEYWORDS: Record<Exclude<QuoteCategory, "any">, string[]> = {
     "books",
     "read",
     "reading",
+    "reader",
     "novel",
     "library",
     "author",
     "page",
     "pages",
     "story",
+    "stories",
     "written",
     "write",
     "writing",
+    "writer",
+    "words",
+    "word",
+    "learn",
+    "learning",
+    "literature",
+    "poem",
+    "poetry",
+    "chapter",
+    "publish",
+    "published",
+    "paper",
+    "essay",
+    "journal",
+    "text",
   ],
 };
 
@@ -134,27 +152,28 @@ function readString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-async function fetchZenQuotes(): Promise<RemoteQuote[]> {
-  const data = await fetchJson(ZENQUOTES_URL);
-  if (!Array.isArray(data)) {
-    return [];
-  }
-  const quotes: RemoteQuote[] = [];
-  for (const item of data) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const row = item as { q?: unknown; a?: unknown };
-    const quote = usableQuote(readString(row.q), readString(row.a));
-    if (quote) {
-      quotes.push(quote);
+function mergeUniqueQuotes(sources: RemoteQuote[][]): RemoteQuote[] {
+  const seen = new Set<string>();
+  const merged: RemoteQuote[] = [];
+  for (const list of sources) {
+    for (const quote of list) {
+      const key = quoteKey(quote.text);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      merged.push(quote);
     }
   }
-  return quotes;
+  return merged;
 }
 
-async function fetchDummyJsonQuotes(): Promise<RemoteQuote[]> {
-  const data = await fetchJson(DUMMYJSON_URL, 10000);
+/** Load DummyJSON's full quote catalog (~1454 items) in one request. */
+async function fetchAllDummyJsonQuotes(): Promise<RemoteQuote[]> {
+  const data = await fetchJson(
+    `${DUMMYJSON_QUOTES_URL}?limit=${DUMMYJSON_BATCH_SIZE}&skip=0`,
+    15000
+  );
   if (!data || typeof data !== "object") {
     return [];
   }
@@ -169,6 +188,25 @@ async function fetchDummyJsonQuotes(): Promise<RemoteQuote[]> {
     }
     const row = item as { quote?: unknown; author?: unknown };
     const quote = usableQuote(readString(row.quote), readString(row.author));
+    if (quote) {
+      quotes.push(quote);
+    }
+  }
+  return quotes;
+}
+
+async function fetchZenQuotes(): Promise<RemoteQuote[]> {
+  const data = await fetchJson(ZENQUOTES_URL);
+  if (!Array.isArray(data)) {
+    return [];
+  }
+  const quotes: RemoteQuote[] = [];
+  for (const item of data) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const row = item as { q?: unknown; a?: unknown };
+    const quote = usableQuote(readString(row.q), readString(row.a));
     if (quote) {
       quotes.push(quote);
     }
@@ -213,33 +251,24 @@ export function quoteMatchesCategory(
 }
 
 /**
- * Live quotes from three keyless public APIs. Each source fails independently
- * and is cached so pagination can reuse one merged pool. Throws when every
- * source fails so the gallery never falls back to bundled quotes.
+ * Full de-duplicated quote catalog from DummyJSON pagination plus
+ * supplementary live sources. Throws when every source fails.
  */
 export async function fetchLiveQuotes(): Promise<RemoteQuote[]> {
   const results = await Promise.allSettled([
+    cachedFetch("dummyjson-all", LIVE_CACHE_TTL_MS, fetchAllDummyJsonQuotes),
     cachedFetch("zenquotes", LIVE_CACHE_TTL_MS, fetchZenQuotes),
-    cachedFetch("dummyjson", LIVE_CACHE_TTL_MS, fetchDummyJsonQuotes),
     cachedFetch("quotesondesign", LIVE_CACHE_TTL_MS, fetchQuotesOnDesign),
   ]);
 
-  const seen = new Set<string>();
-  const merged: RemoteQuote[] = [];
+  const batches: RemoteQuote[][] = [];
   for (const result of results) {
-    if (result.status !== "fulfilled") {
-      continue;
-    }
-    for (const quote of result.value) {
-      const key = quoteKey(quote.text);
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      merged.push(quote);
+    if (result.status === "fulfilled" && result.value.length > 0) {
+      batches.push(result.value);
     }
   }
 
+  const merged = mergeUniqueQuotes(batches);
   if (merged.length === 0) {
     throw new Error("Quotes could not be fetched.");
   }

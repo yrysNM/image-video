@@ -17,7 +17,7 @@ const THEME_SUGGESTIONS = [
   "Cherry blossoms",
 ];
 
-const PAGE_SIZE = 6;
+const PAGE_SIZE = 30;
 
 // Remember the user's last-picked quote category across visits.
 const CATEGORY_STORAGE_KEY = "imagetovideo:wallpaper-quote-category";
@@ -55,21 +55,14 @@ function isNetworkError(err: unknown): boolean {
   );
 }
 
-function quoteKey(quote: string): string {
-  return quote.trim().toLowerCase();
-}
-
 function uniqueWallpapers(current: Wallpaper[], incoming: Wallpaper[]): Wallpaper[] {
   const seenIds = new Set(current.map((item) => item.id));
-  const seenQuotes = new Set(current.map((item) => quoteKey(item.quote)));
   const extra: Wallpaper[] = [];
   for (const item of incoming) {
-    const key = quoteKey(item.quote);
-    if (seenIds.has(item.id) || seenQuotes.has(key)) {
+    if (seenIds.has(item.id)) {
       continue;
     }
     seenIds.add(item.id);
-    seenQuotes.add(key);
     extra.push(item);
   }
   return extra;
@@ -97,12 +90,13 @@ type WallpapersResponse = {
   items: Wallpaper[];
   salt: string;
   offset: number;
+  nextOffset?: number;
   hasMore?: boolean;
 };
 
 export function WallpaperGallery() {
   const [theme, setTheme] = useState("");
-  const [source, setSource] = useState<WallpaperSource>("ai");
+  const [source, setSource] = useState<WallpaperSource>("photo");
   const [category, setCategory] = useState<QuoteCategory>("any");
   const [items, setItems] = useState<Wallpaper[]>([]);
   const [salt, setSalt] = useState<string | null>(null);
@@ -116,9 +110,13 @@ export function WallpaperGallery() {
   const inFlightRef = useRef(false);
   const requestGenRef = useRef(0);
   const nextOffsetRef = useRef(0);
+  const itemsRef = useRef<Wallpaper[]>([]);
+  const saltRef = useRef<string | null>(null);
   const requestParamsRef = useRef({ theme, source, category });
 
   requestParamsRef.current = { theme, source, category };
+  itemsRef.current = items;
+  saltRef.current = salt;
 
   const fetchWallpapers = useCallback(
     async (options: { append?: boolean; offset?: number; salt?: string | null } = {}) => {
@@ -129,14 +127,16 @@ export function WallpaperGallery() {
         category: nextCategory,
       } = requestParamsRef.current;
       const offset = options.offset ?? 0;
-      const nextSalt = append ? (options.salt ?? salt) : null;
+      const nextSalt = append ? (options.salt ?? saltRef.current) : null;
 
       if (isBrowserOffline()) {
         setOffline(true);
         setLoading(false);
         setLoadingMore(false);
         setItems([]);
+        itemsRef.current = [];
         setSalt(null);
+        saltRef.current = null;
         setError(null);
         return;
       }
@@ -158,7 +158,9 @@ export function WallpaperGallery() {
         setLoadingMore(false);
         setHasMore(true);
         setItems([]);
+        itemsRef.current = [];
         setSalt(null);
+        saltRef.current = null;
       }
       setError(null);
       setOffline(false);
@@ -192,15 +194,17 @@ export function WallpaperGallery() {
           return;
         }
         const incoming = data.items;
+        const base = append ? itemsRef.current : [];
+        const extra = uniqueWallpapers(base, incoming);
+        const nextItems = append ? [...base, ...extra] : extra;
+        itemsRef.current = nextItems;
+        saltRef.current = data.salt;
         setSalt(data.salt);
-        setItems((current) => {
-          const extra = uniqueWallpapers(append ? current : [], incoming);
-          return append ? [...current, ...extra] : extra;
-        });
+        setItems(nextItems);
         nextOffsetRef.current = append
-          ? Math.max(nextOffsetRef.current, offset + incoming.length)
-          : incoming.length;
-        setHasMore((data.hasMore ?? incoming.length >= PAGE_SIZE) && incoming.length > 0);
+          ? Math.max(nextOffsetRef.current, data.nextOffset ?? offset + incoming.length)
+          : (data.nextOffset ?? incoming.length);
+        setHasMore(Boolean(data.hasMore));
       } catch (err) {
         if (requestGen !== requestGenRef.current) {
           return;
@@ -209,13 +213,17 @@ export function WallpaperGallery() {
           setOffline(true);
           setError(null);
           setItems([]);
+          itemsRef.current = [];
           setSalt(null);
+          saltRef.current = null;
           return;
         }
         setError(err instanceof Error ? err.message : "Something went wrong.");
         if (!append) {
           setItems([]);
+          itemsRef.current = [];
           setSalt(null);
+          saltRef.current = null;
         }
       } finally {
         if (requestGen === requestGenRef.current) {
@@ -228,7 +236,7 @@ export function WallpaperGallery() {
         }
       }
     },
-    [salt]
+    []
   );
 
   const generate = useCallback(
@@ -294,7 +302,9 @@ export function WallpaperGallery() {
       setLoading(false);
       setLoadingMore(false);
       setItems([]);
+      itemsRef.current = [];
       setSalt(null);
+      saltRef.current = null;
       setError(null);
     };
     window.addEventListener("online", handleOnline);
@@ -307,25 +317,23 @@ export function WallpaperGallery() {
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
-    if (!sentinel || items.length === 0 || offline) {
+    if (!sentinel || items.length === 0 || offline || loading || loadingMore || !hasMore || !salt) {
       return;
     }
 
     const observer = new IntersectionObserver(
       (entries) => {
         const [entry] = entries;
-        if (
-          !entry?.isIntersecting ||
-          loading ||
-          loadingMore ||
-          !hasMore ||
-          !salt
-        ) {
+        if (!entry?.isIntersecting || inFlightRef.current || loadingMore || !hasMore) {
           return;
         }
-        void fetchWallpapers({ append: true, offset: nextOffsetRef.current, salt });
+        void fetchWallpapers({
+          append: true,
+          offset: nextOffsetRef.current,
+          salt: saltRef.current,
+        });
       },
-      { rootMargin: "240px 0px" }
+      { root: null, rootMargin: "320px 0px", threshold: 0 }
     );
 
     observer.observe(sentinel);
@@ -480,7 +488,13 @@ export function WallpaperGallery() {
             </div>
           )}
 
-          <div ref={sentinelRef} className="h-px" aria-hidden />
+          <div ref={sentinelRef} className="h-8 w-full" aria-hidden />
+
+          {!loading && !loadingMore && items.length > 0 && !hasMore && (
+            <p className="text-center text-sm text-slate-500">
+              You&apos;ve seen every unique quote for this selection.
+            </p>
+          )}
         </>
       )}
 
