@@ -71,6 +71,45 @@ async function poolForCategory(category: QuoteCategory): Promise<Quote[]> {
   return work;
 }
 
+const CATEGORY_POOL_TTL_MS = 10 * 60 * 1000;
+const categoryPoolCache = new Map<
+  QuoteCategory,
+  { quotes: Quote[]; expires: number }
+>();
+const categoryPoolInflight = new Map<QuoteCategory, Promise<Quote[]>>();
+
+async function loadPoolForCategory(category: QuoteCategory): Promise<Quote[]> {
+  const bundled = bundledPool(category);
+  const live =
+    category === "books"
+      ? []
+      : (await fetchLiveQuotes()).filter((quote) =>
+          quoteMatchesCategory(quote, category)
+        );
+  const quotes = dedupeByText([...bundled, ...live]);
+  categoryPoolCache.set(category, {
+    quotes,
+    expires: Date.now() + CATEGORY_POOL_TTL_MS,
+  });
+  return quotes;
+}
+
+async function poolForCategory(category: QuoteCategory): Promise<Quote[]> {
+  const hit = categoryPoolCache.get(category);
+  if (hit && hit.expires > Date.now()) {
+    return hit.quotes;
+  }
+  const pending = categoryPoolInflight.get(category);
+  if (pending) {
+    return pending;
+  }
+  const work = loadPoolForCategory(category).finally(() => {
+    categoryPoolInflight.delete(category);
+  });
+  categoryPoolInflight.set(category, work);
+  return work;
+}
+
 function hashString(value: string): number {
   let hash = 2166136261 >>> 0;
   for (let i = 0; i < value.length; i += 1) {
